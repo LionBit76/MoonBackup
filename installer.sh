@@ -1,5 +1,5 @@
 #!/bin/bash
-# MoonBackup Installer v0.9.7
+# MoonBackup Installer v0.9.8
 # Created: 2024-05-04
 # Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
@@ -21,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}      MoonBackup Installer v0.9.7       ${NC}"
+echo -e "${GREEN}      MoonBackup Installer v0.9.8       ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
@@ -88,11 +88,10 @@ fi
 echo ""
 echo "Installing database pre-boot backup service..."
 
-# Copy pre-boot backup script
+# Check if pre-boot backup script exists
 if [ ! -f "$SCRIPT_DIR/db_preboot_backup.sh" ]; then
     echo -e "${YELLOW}✗ Pre-boot backup script not found in $SCRIPT_DIR${NC}"
 else
-    cp "$SCRIPT_DIR/db_preboot_backup.sh" "$SCRIPT_DIR/db_preboot_backup.sh"
     chmod +x "$SCRIPT_DIR/db_preboot_backup.sh"
     echo -e "${GREEN}✓ Pre-boot backup script is ready${NC}"
     
