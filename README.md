@@ -57,6 +57,8 @@ The installer will:
 2. Create the ~/Backup directory
 3. Copy configuration files to ~/printer_data/config/
 4. Register macros in printer.cfg
+5. Register update_manager in moonraker.conf
+6. Restart Moonraker
 
 ## Configuration
 

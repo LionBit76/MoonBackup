@@ -1,5 +1,7 @@
 #!/bin/bash
-# MoonBackup Installer
+# MoonBackup Installer v0.9.1
+# Created: 2024-05-04
+# Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
 
 set -euo pipefail
@@ -19,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}       MoonBackup Installer            ${NC}"
+echo -e "${GREEN}      MoonBackup Installer v0.9.1       ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
@@ -96,8 +98,7 @@ else
     echo "Adding MoonBackup macros to printer.cfg..."
     
     # Backup printer.cfg with leading dot to hide it
-    cp "$PRINTER_CONFIG" "$PRINTER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)"
-    mv "$PRINTER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)" ".$PRINTER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)"
+    cp "$PRINTER_CONFIG" "$CONFIG_DIR/.printer.cfg.bak.$(date +%Y%m%d-%H%M%S)"
     
     # Add macros at the end of the file
     cat >> "$PRINTER_CONFIG" << EOF
@@ -120,7 +121,7 @@ gcode:
 EOF
     
     echo -e "${GREEN}✓ MoonBackup macros added to printer.cfg${NC}"
-    echo -e "${YELLOW}  Original printer.cfg backed up as .$PRINTER_CONFIG.bak.<timestamp>${NC}"
+    echo -e "${YELLOW}  Original printer.cfg backed up as $CONFIG_DIR/.printer.cfg.bak.<timestamp>${NC}"
 fi
 
 # Check if update_manager entry already exists in moonraker.conf
@@ -131,8 +132,7 @@ else
     echo "Adding MoonBackup update_manager to moonraker.conf..."
     
     # Backup moonraker.conf with leading dot to hide it
-    cp "$MOONRAKER_CONFIG" "$MOONRAKER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)"
-    mv "$MOONRAKER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)" ".$MOONRAKER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)"
+    cp "$MOONRAKER_CONFIG" "$CONFIG_DIR/.moonraker.conf.bak.$(date +%Y%m%d-%H%M%S)"
     
     # Add update_manager at the end of the file
     cat >> "$MOONRAKER_CONFIG" << EOF
@@ -149,7 +149,7 @@ is_active: true
 EOF
     
     echo -e "${GREEN}✓ MoonBackup update_manager added to moonraker.conf${NC}"
-    echo -e "${YELLOW}  Original moonraker.conf backed up as .$MOONRAKER_CONFIG.bak.<timestamp>${NC}"
+    echo -e "${YELLOW}  Original moonraker.conf backed up as $CONFIG_DIR/.moonraker.conf.bak.<timestamp>${NC}"
 fi
 
 # Create config directory for MoonBackup if it doesn't exist
