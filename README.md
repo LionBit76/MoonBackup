@@ -52,7 +52,7 @@ sudo systemctl restart moonraker
 
 ```bash
 # Clone or download MoonBackup to your home directory
-git clone https://github.com/your-username/MoonBackup.git ~/MoonBackup
+git clone https://github.com/LionBit76/MoonBackup.git ~/MoonBackup
 
 # Run the installer
 cd ~/MoonBackup
