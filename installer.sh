@@ -1,5 +1,5 @@
 #!/bin/bash
-# MoonBackup Installer v0.9.8
+# MoonBackup Installer v0.9.9
 # Created: 2024-05-04
 # Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
@@ -21,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}      MoonBackup Installer v0.9.8       ${NC}"
+echo -e "${GREEN}      MoonBackup Installer v0.9.9       ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
@@ -97,22 +97,26 @@ else
     
     # Install systemd service
     if command_exists systemctl; then
-        # Get current user
         CURRENT_USER=$(whoami)
         SERVICE_FILE="/etc/systemd/system/db_preboot_backup.service"
         
         if [ ! -f "$SERVICE_FILE" ]; then
-            # Create service file with correct user
+            # Create service file with correct user path
+            # Create service file with correct paths
+            MOONBACKUP_SCRIPT="$SCRIPT_DIR/db_preboot_backup.sh"
             sudo bash -c "cat > '$SERVICE_FILE' << INNEREOF
 [Unit]
 Description=MoonBackup Database Pre-Boot Backup
-After=network.target
+After=network-online.target
 Before=moonraker.service
 
 [Service]
 Type=oneshot
 User=$CURRENT_USER
-ExecStart=$HOME/MoonBackup/db_preboot_backup.sh
+ExecStartPre=/bin/sleep 5
+ExecStart=$MOONBACKUP_SCRIPT
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -120,10 +124,20 @@ INNEREOF"
             
             sudo systemctl daemon-reload
             sudo systemctl enable db_preboot_backup.service
-            echo -e "${GREEN}✓ Pre-boot backup service installed and enabled${NC}"
-            echo -e "  Run 'sudo systemctl start db_preboot_backup.service' to test"
+            sudo systemctl start db_preboot_backup.service
+            
+            # Verify service is enabled
+            if sudo systemctl is-enabled db_preboot_backup.service 2>/dev/null | grep -q "enabled"; then
+                echo -e "${GREEN}✓ Pre-boot backup service installed and enabled${NC}"
+                echo -e "  Check status with: sudo systemctl status db_preboot_backup.service"
+            else
+                echo -e "${YELLOW}⚠ Pre-boot backup service installed but not enabled${NC}"
+                echo -e "  Try: sudo systemctl enable db_preboot_backup.service"
+                echo -e "  Then: sudo systemctl start db_preboot_backup.service"
+            fi
         else
             echo -e "${YELLOW}✓ Pre-boot backup service already exists${NC}"
+            echo -e "  Check status with: sudo systemctl status db_preboot_backup.service"
         fi
     else
         echo -e "${YELLOW}  systemctl not available, skipping service installation${NC}"
