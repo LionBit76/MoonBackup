@@ -1,5 +1,5 @@
 #!/bin/bash
-# MoonBackup Installer v0.9.2
+# MoonBackup Installer v0.9.3
 # Created: 2024-05-04
 # Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
@@ -21,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}      MoonBackup Installer v0.9.2       ${NC}"
+echo -e "${GREEN}      MoonBackup Installer v0.9.3       ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
@@ -100,9 +100,17 @@ else
     # Backup printer.cfg with leading dot to hide it
     cp "$PRINTER_CONFIG" "$CONFIG_DIR/.printer.cfg.bak.$(date +%Y%m%d-%H%M%S)"
     
-    # Add macros at the end of the file
+    # Find the SAVE_CONFIG marker and insert macros before it
     MOONBACKUP_PATH="$HOME/MoonBackup"
-    cat >> "$PRINTER_CONFIG" << EOF
+    SAVE_CONFIG_LINE=$(grep -n "#\*# <---------------------- SAVE_CONFIG" "$PRINTER_CONFIG" | head -1 | cut -d: -f1)
+    
+    if [ -n "$SAVE_CONFIG_LINE" ]; then
+        # Create temp file with macros inserted before SAVE_CONFIG
+        head -n $((SAVE_CONFIG_LINE - 1)) "$PRINTER_CONFIG" > "$PRINTER_CONFIG.tmp"
+        
+        # Create macros file with expanded variables
+        MOONBACKUP_MACROS_FILE=$(mktemp)
+        cat > "$MOONBACKUP_MACROS_FILE" << EOF
 
 # MoonBackup Macros
 [gcode_macro BACKUP]
@@ -120,6 +128,32 @@ gcode:
   RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/moonbackup.sh --status"
   RESPOND MSG="Backup status check initiated."
 EOF
+        
+        cat "$MOONBACKUP_MACROS_FILE" >> "$PRINTER_CONFIG.tmp"
+        tail -n +$SAVE_CONFIG_LINE "$PRINTER_CONFIG" >> "$PRINTER_CONFIG.tmp"
+        mv "$PRINTER_CONFIG.tmp" "$PRINTER_CONFIG"
+        rm -f "$MOONBACKUP_MACROS_FILE"
+    else
+        # If no SAVE_CONFIG marker, append to end of file
+        cat >> "$PRINTER_CONFIG" << EOF
+
+# MoonBackup Macros
+[gcode_macro BACKUP]
+gcode:
+  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/moonbackup.sh"
+  RESPOND MSG="MoonBackup started. Check terminal for progress."
+
+[gcode_macro RESTORE]
+gcode:
+  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/restore.sh"
+  RESPOND MSG="MoonRestore started. Check terminal for progress."
+
+[gcode_macro BACKUP_STATUS]
+gcode:
+  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/moonbackup.sh --status"
+  RESPOND MSG="Backup status check initiated."
+EOF
+    fi
     
     echo -e "${GREEN}✓ MoonBackup macros added to printer.cfg${NC}"
     echo -e "${YELLOW}  Original printer.cfg backed up as $CONFIG_DIR/.printer.cfg.bak.<timestamp>${NC}"
@@ -186,6 +220,10 @@ echo ""
 
 # Restart Moonraker to apply changes
 echo "Restarting Moonraker..."
+command_exists() {
+    command -v "$1" > /dev/null 2>&1
+}
+
 if command_exists systemctl; then
     sudo systemctl restart moonraker
     echo -e "${GREEN}✓ Moonraker restarted${NC}"
