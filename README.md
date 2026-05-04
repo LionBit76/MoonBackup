@@ -56,7 +56,7 @@ The installer will:
 1. Check for G-Code Shell Command
 2. Create the ~/Backup directory
 3. Copy configuration files to ~/printer_data/config/
-4. Register macros in moonraker.conf
+4. Register macros in printer.cfg
 
 ## Configuration
 
@@ -178,25 +178,25 @@ After installation, the following macros will be available in Moonraker WebUI:
 
 ```bash
 # Start a backup
-bash ~/printer_data/config/moonbackup.sh
+bash ~/MoonBackup/moonbackup.sh
 
 # Check backup status
-bash ~/printer_data/config/moonbackup.sh --status
+bash ~/MoonBackup/moonbackup.sh --status
 
 # Restore from latest local backup
-bash ~/printer_data/config/restore.sh
+bash ~/MoonBackup/restore.sh
 
 # List available backups
-bash ~/printer_data/config/restore.sh list
+bash ~/MoonBackup/restore.sh list
 
 # Restore from specific local backup
-bash ~/printer_data/config/restore.sh local /path/to/backup.tar.gz
+bash ~/MoonBackup/restore.sh local /path/to/backup.tar.gz
 
 # Restore from GitHub
-bash ~/printer_data/config/restore.sh github
+bash ~/MoonBackup/restore.sh github
 
 # Restore from SCP
-bash ~/printer_data/config/restore.sh scp
+bash ~/MoonBackup/restore.sh scp
 ```
 
 ## Backup Files
@@ -284,9 +284,7 @@ bash -n ~/printer_data/config/MoonBackup.cfg && echo "Config is valid" || echo "
 └── README.md             # This file
 
 ~/printer_data/config/
-├── MoonBackup.cfg        # Active configuration
-├── moonbackup.sh         # Copy of main backup script
-└── restore.sh            # Copy of restore script
+└── MoonBackup.cfg        # Active configuration (copied from ~/MoonBackup/config/)
 
 ~/Backup/                 # Local backups (excluded from backup)
 └── voron-backup_*.tar.gz

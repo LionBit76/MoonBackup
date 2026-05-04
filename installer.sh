@@ -9,7 +9,7 @@ HOME_DIR="$HOME"
 CONFIG_DIR="$HOME_DIR/printer_data/config"
 MOONBACKUP_CONFIG="$CONFIG_DIR/MoonBackup.cfg"
 BACKUP_DIR="$HOME_DIR/Backup"
-MOONRAKER_CONFIG="$CONFIG_DIR/moonraker.conf"
+PRINTER_CONFIG="$CONFIG_DIR/printer.cfg"
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,12 +35,10 @@ SHELL_COMMAND_FOUND=0
 if [ -f "$HOME/printer_data/config/shell_command.cfg" ]; then
     SHELL_COMMAND_FOUND=1
 else
-    # Check multiple possible locations for shell_command.py
+    # Check possible locations for shell_command.py
     for SHELL_COMMAND_FILE in \
         "$HOME/moonraker/moonraker/components/shell_command.py" \
-        "$HOME/Moonraker/moonraker/components/shell_command.py" \
-        "/usr/local/lib/python*/dist-packages/moonraker/components/shell_command.py" \
-        "/usr/lib/python*/dist-packages/moonraker/components/shell_command.py"; do
+        "$HOME/Moonraker/moonraker/components/shell_command.py"; do
         if [ -f "$SHELL_COMMAND_FILE" ]; then
             SHELL_COMMAND_FOUND=1
             break
@@ -83,70 +81,55 @@ else
     echo -e "${YELLOW}✓ MoonBackup.cfg already exists at $MOONBACKUP_CONFIG (not overwritten)${NC}"
 fi
 
-# Copy scripts
-if [ ! -f "$CONFIG_DIR/moonbackup.sh" ]; then
-    cp "$SCRIPT_DIR/moonbackup.sh" "$CONFIG_DIR/"
-    chmod +x "$CONFIG_DIR/moonbackup.sh"
-    echo -e "${GREEN}✓ Copied moonbackup.sh to $CONFIG_DIR/${NC}"
-else
-    echo -e "${YELLOW}✓ moonbackup.sh already exists at $CONFIG_DIR/ (not overwritten)${NC}"
-fi
 
-if [ ! -f "$CONFIG_DIR/restore.sh" ]; then
-    cp "$SCRIPT_DIR/restore.sh" "$CONFIG_DIR/"
-    chmod +x "$CONFIG_DIR/restore.sh"
-    echo -e "${GREEN}✓ Copied restore.sh to $CONFIG_DIR/${NC}"
-else
-    echo -e "${YELLOW}✓ restore.sh already exists at $CONFIG_DIR/ (not overwritten)${NC}"
-fi
 
-# Register macros in moonraker.conf
+# Register macros in printer.cfg
 echo ""
-echo "Checking moonraker.conf for MoonBackup configurations..."
+echo "Checking printer.cfg for MoonBackup configurations..."
 
 # Check if macros already exist
-if grep -q "gcode_macro BACKUP" "$MOONRAKER_CONFIG" 2>/dev/null; then
-    echo -e "${YELLOW}✓ MoonBackup macros already registered in moonraker.conf${NC}"
+if grep -q "gcode_macro BACKUP" "$PRINTER_CONFIG" 2>/dev/null; then
+    echo -e "${YELLOW}✓ MoonBackup macros already registered in printer.cfg${NC}"
 else
     echo ""
-    echo "Adding MoonBackup macros to moonraker.conf..."
+    echo "Adding MoonBackup macros to printer.cfg..."
     
-    # Backup moonraker.conf
-    cp "$MOONRAKER_CONFIG" "$MOONRAKER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)"
+    # Backup printer.cfg
+    cp "$PRINTER_CONFIG" "$PRINTER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)"
     
     # Add macros at the end of the file
-    cat >> "$MOONRAKER_CONFIG" << EOF
+    cat >> "$PRINTER_CONFIG" << EOF
 
 # MoonBackup Macros
 [gcode_macro BACKUP]
 gcode:
-  RUN_SHELL_COMMAND CMD=bash ${CONFIG_DIR}/moonbackup.sh
+  RUN_SHELL_COMMAND CMD=bash ${SCRIPT_DIR}/moonbackup.sh
   RESPOND MSG="MoonBackup started. Check terminal for progress."
 
 [gcode_macro RESTORE]
 gcode:
-  RUN_SHELL_COMMAND CMD=bash ${CONFIG_DIR}/restore.sh
+  RUN_SHELL_COMMAND CMD=bash ${SCRIPT_DIR}/restore.sh
   RESPOND MSG="MoonRestore started. Check terminal for progress."
 
 [gcode_macro BACKUP_STATUS]
 gcode:
-  RUN_SHELL_COMMAND CMD=bash ${CONFIG_DIR}/moonbackup.sh --status
+  RUN_SHELL_COMMAND CMD=bash ${SCRIPT_DIR}/moonbackup.sh --status
   RESPOND MSG="Backup status check initiated."
 EOF
     
-    echo -e "${GREEN}✓ MoonBackup macros added to moonraker.conf${NC}"
-    echo -e "${YELLOW}  Original moonraker.conf backed up as $MOONRAKER_CONFIG.bak.<timestamp>${NC}"
+    echo -e "${GREEN}✓ MoonBackup macros added to printer.cfg${NC}"
+    echo -e "${YELLOW}  Original printer.cfg backed up as $PRINTER_CONFIG.bak.<timestamp>${NC}"
 fi
 
 # Check if update_manager entry already exists
-if grep -q "update_manager MoonBackup" "$MOONRAKER_CONFIG" 2>/dev/null; then
-    echo -e "${YELLOW}✓ MoonBackup update_manager already registered in moonraker.conf${NC}"
+if grep -q "update_manager MoonBackup" "$PRINTER_CONFIG" 2>/dev/null; then
+    echo -e "${YELLOW}✓ MoonBackup update_manager already registered in printer.cfg${NC}"
 else
     echo ""
-    echo "Adding MoonBackup update_manager to moonraker.conf..."
+    echo "Adding MoonBackup update_manager to printer.cfg..."
     
     # Add update_manager at the end of the file
-    cat >> "$MOONRAKER_CONFIG" << EOF
+    cat >> "$PRINTER_CONFIG" << EOF
 
 # MoonBackup Update Manager
 [update_manager MoonBackup]
@@ -159,7 +142,7 @@ primary_branch: main
 is_active: true
 EOF
     
-    echo -e "${GREEN}✓ MoonBackup update_manager added to moonraker.conf${NC}"
+    echo -e "${GREEN}✓ MoonBackup update_manager added to printer.cfg${NC}"
 fi
 
 # Create config directory for MoonBackup if it doesn't exist
@@ -186,9 +169,10 @@ echo "     - RESTORE: Restore from the last backup"
 echo "     - BACKUP_STATUS: Check backup status"
 echo ""
 echo "Or run manually:"
-echo "  - Backup:  bash $CONFIG_DIR/moonbackup.sh"
-echo "  - Restore: bash $CONFIG_DIR/restore.sh"
+echo "  - Backup:  bash $SCRIPT_DIR/moonbackup.sh"
+echo "  - Restore: bash $SCRIPT_DIR/restore.sh"
 echo ""
 echo "Configuration file location: $MOONBACKUP_CONFIG"
 echo "Backup directory: $BACKUP_DIR"
+echo "Scripts location: $SCRIPT_DIR"
 echo ""
