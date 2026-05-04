@@ -1,0 +1,12 @@
+[Unit]
+Description=MoonBackup Database Pre-Boot Backup
+After=network.target
+Before=moonraker.service
+
+[Service]
+Type=oneshot
+User=%i
+ExecStart=/home/%i/MoonBackup/db_preboot_backup.sh
+
+[Install]
+WantedBy=multi-user.target

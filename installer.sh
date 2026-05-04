@@ -1,5 +1,5 @@
 #!/bin/bash
-# MoonBackup Installer v0.9.5
+# MoonBackup Installer v0.9.6
 # Created: 2024-05-04
 # Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
@@ -21,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}      MoonBackup Installer v0.9.5       ${NC}"
+echo -e "${GREEN}      MoonBackup Installer v0.9.6       ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
