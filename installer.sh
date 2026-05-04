@@ -83,7 +83,7 @@ fi
 
 # Register macros in moonraker.conf
 echo ""
-echo "Checking moonraker.conf for MoonBackup macros..."
+echo "Checking moonraker.conf for MoonBackup configurations..."
 
 # Check if macros already exist
 if grep -q "gcode_macro BACKUP" "$MOONRAKER_CONFIG" 2>/dev/null; then
@@ -117,6 +117,30 @@ EOF
     
     echo -e "${GREEN}✓ MoonBackup macros added to moonraker.conf${NC}"
     echo -e "${YELLOW}  Original moonraker.conf backed up as $MOONRAKER_CONFIG.bak.<timestamp>${NC}"
+fi
+
+# Check if update_manager entry already exists
+if grep -q "update_manager MoonBackup" "$MOONRAKER_CONFIG" 2>/dev/null; then
+    echo -e "${YELLOW}✓ MoonBackup update_manager already registered in moonraker.conf${NC}"
+else
+    echo ""
+    echo "Adding MoonBackup update_manager to moonraker.conf..."
+    
+    # Add update_manager at the end of the file
+    cat >> "$MOONRAKER_CONFIG" << EOF
+
+# MoonBackup Update Manager
+[update_manager MoonBackup]
+type: git_repo
+channel: stable
+origin: https://github.com/LionBit76/MoonBackup.git
+path: ~/MoonBackup
+managed_services: 
+primary_branch: main
+is_active: true
+EOF
+    
+    echo -e "${GREEN}✓ MoonBackup update_manager added to moonraker.conf${NC}"
 fi
 
 # Create config directory for MoonBackup if it doesn't exist
