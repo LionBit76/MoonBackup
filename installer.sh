@@ -29,7 +29,26 @@ if [ "$EUID" -eq 0 ]; then
 fi
 
 # Check for G-Code Shell Command
-if ! command -v gcode_shell_command &> /dev/null; then
+SHELL_COMMAND_FOUND=0
+
+# Check for shell_command.cfg (exists when G-Code Shell Command is installed)
+if [ -f "$HOME/printer_data/config/shell_command.cfg" ]; then
+    SHELL_COMMAND_FOUND=1
+else
+    # Check multiple possible locations for shell_command.py
+    for SHELL_COMMAND_FILE in \
+        "$HOME/moonraker/moonraker/components/shell_command.py" \
+        "$HOME/Moonraker/moonraker/components/shell_command.py" \
+        "/usr/local/lib/python*/dist-packages/moonraker/components/shell_command.py" \
+        "/usr/lib/python*/dist-packages/moonraker/components/shell_command.py"; do
+        if [ -f "$SHELL_COMMAND_FILE" ]; then
+            SHELL_COMMAND_FOUND=1
+            break
+        fi
+    done
+fi
+
+if [ "$SHELL_COMMAND_FOUND" -eq 0 ]; then
     echo -e "${RED}ERROR: G-Code Shell Command is not installed!${NC}"
     echo ""
     echo "MoonBackup requires G-Code Shell Command to be installed."

@@ -41,13 +41,6 @@ Then restart Moonraker:
 sudo systemctl restart moonraker
 ```
 
-**Note**: On some systems, you may need to install it manually. If KIAUH is not available, you can try:
-```bash
-sudo apt update
-sudo apt install -y moonraker-gcode-shell-command
-sudo systemctl restart moonraker
-```
-
 ### Install MoonBackup
 
 ```bash
