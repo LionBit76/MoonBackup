@@ -184,8 +184,8 @@ create_exclude_list() {
         done
     fi
     
-    # Print all excludes
-    printf "%s\n" "${excludes[@]}"
+    # Return excludes as space-separated string
+    printf "%s " "${excludes[@]}"
 }
 
 # Stop Moonraker
