@@ -1,5 +1,5 @@
 #!/bin/bash
-# MoonBackup Installer v0.9.6
+# MoonBackup Installer v0.9.7
 # Created: 2024-05-04
 # Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
@@ -21,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}      MoonBackup Installer v0.9.6       ${NC}"
+echo -e "${GREEN}      MoonBackup Installer v0.9.7       ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
@@ -84,6 +84,53 @@ else
     echo -e "${YELLOW}✓ MoonBackup.cfg already exists at $MOONBACKUP_CONFIG (not overwritten)${NC}"
 fi
 
+# Install database pre-boot backup service
+echo ""
+echo "Installing database pre-boot backup service..."
+
+# Copy pre-boot backup script
+if [ ! -f "$SCRIPT_DIR/db_preboot_backup.sh" ]; then
+    echo -e "${YELLOW}✗ Pre-boot backup script not found in $SCRIPT_DIR${NC}"
+else
+    cp "$SCRIPT_DIR/db_preboot_backup.sh" "$SCRIPT_DIR/db_preboot_backup.sh"
+    chmod +x "$SCRIPT_DIR/db_preboot_backup.sh"
+    echo -e "${GREEN}✓ Pre-boot backup script is ready${NC}"
+    
+    # Install systemd service
+    if command_exists systemctl; then
+        # Get current user
+        CURRENT_USER=$(whoami)
+        SERVICE_FILE="/etc/systemd/system/db_preboot_backup.service"
+        
+        if [ ! -f "$SERVICE_FILE" ]; then
+            # Create service file with correct user
+            sudo bash -c "cat > '$SERVICE_FILE' << INNEREOF
+[Unit]
+Description=MoonBackup Database Pre-Boot Backup
+After=network.target
+Before=moonraker.service
+
+[Service]
+Type=oneshot
+User=$CURRENT_USER
+ExecStart=$HOME/MoonBackup/db_preboot_backup.sh
+
+[Install]
+WantedBy=multi-user.target
+INNEREOF"
+            
+            sudo systemctl daemon-reload
+            sudo systemctl enable db_preboot_backup.service
+            echo -e "${GREEN}✓ Pre-boot backup service installed and enabled${NC}"
+            echo -e "  Run 'sudo systemctl start db_preboot_backup.service' to test"
+        else
+            echo -e "${YELLOW}✓ Pre-boot backup service already exists${NC}"
+        fi
+    else
+        echo -e "${YELLOW}  systemctl not available, skipping service installation${NC}"
+        echo -e "  You can manually run: bash $SCRIPT_DIR/db_preboot_backup.sh"
+    fi
+fi
 
 
 # Register macros in printer.cfg

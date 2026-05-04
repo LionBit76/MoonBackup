@@ -197,6 +197,37 @@ extract_backup() {
     return 0
 }
 
+# Restore database from pre-boot backup
+restore_database() {
+    local db_backup_dir="$HOME/Backup/db_backup"
+    
+    if [ ! -d "$db_backup_dir" ]; then
+        log "INFO" "No database pre-boot backups found in $db_backup_dir"
+        return 0
+    fi
+    
+    # Find latest database backup
+    local latest_db
+    latest_db=$(find "$db_backup_dir" -name "moonraker_db_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
+    
+    if [ -z "$latest_db" ] || [ ! -f "$latest_db" ]; then
+        log "INFO" "No database backup found in $db_backup_dir"
+        return 0
+    fi
+    
+    log "INFO" "Found database backup: $latest_db"
+    log "INFO" "Restoring database from pre-boot backup..."
+    
+    # Extract database backup
+    if ! tar -xzf "$latest_db" -C "$HOME" 2>> "$LOG_FILE"; then
+        log "ERROR" "Failed to restore database from pre-boot backup"
+        return 1
+    fi
+    
+    log "SUCCESS" "Database restored from pre-boot backup"
+    return 0
+}
+
 # List available backups
 list_backups() {
     echo -e "${GREEN}Available Backups:${NC}"
@@ -275,6 +306,11 @@ restore_local() {
             rm -rf "$temp_dir"
             return 1
         fi
+    fi
+    
+    # Restore latest database from pre-boot backup (overwrites DB from main backup)
+    if ! restore_database; then
+        log "WARN" "Database restore from pre-boot backup failed, using DB from main backup"
     fi
     
     # Cleanup
