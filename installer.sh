@@ -197,17 +197,17 @@ verbose: True
 [gcode_macro BACKUP]
 gcode:
   RUN_SHELL_COMMAND CMD=moonbackup_backup
-  RESPOND MSG="MoonBackup started. Check terminal for progress."
+  RESPOND MSG="🔄 MoonBackup running. Please wait... Backup in progress."
 
 [gcode_macro RESTORE]
 gcode:
   RUN_SHELL_COMMAND CMD=moonbackup_restore
-  RESPOND MSG="MoonRestore started. Check terminal for progress."
+  RESPOND MSG="🔄 MoonRestore running. Please wait... Restore in progress."
 
 [gcode_macro BACKUP_STATUS]
 gcode:
   RUN_SHELL_COMMAND CMD=moonbackup_status
-  RESPOND MSG="Backup status check initiated."
+  RESPOND MSG="🔍 Checking MoonBackup status..."
 EOF
         
         cat "$MOONBACKUP_COMMANDS_FILE" >> "$PRINTER_CONFIG.tmp"
@@ -220,13 +220,13 @@ EOF
 
 # MoonBackup Shell Commands
 [gcode_shell_command moonbackup_backup]
-command: bash ${MOONBACKUP_PATH}/moonbackup.sh --no-stop
-timeout: 120
+command: bash ${MOONBACKUP_PATH}/moonbackup.sh
+timeout: 180
 verbose: True
 
 [gcode_shell_command moonbackup_restore]
 command: bash ${MOONBACKUP_PATH}/restore.sh
-timeout: 180
+timeout: 300
 verbose: True
 
 [gcode_shell_command moonbackup_status]
@@ -238,17 +238,17 @@ verbose: True
 [gcode_macro BACKUP]
 gcode:
   RUN_SHELL_COMMAND CMD=moonbackup_backup
-  RESPOND MSG="MoonBackup started. Check terminal for progress."
+  RESPOND MSG="🔄 MoonBackup running. Please wait... Backup in progress."
 
 [gcode_macro RESTORE]
 gcode:
   RUN_SHELL_COMMAND CMD=moonbackup_restore
-  RESPOND MSG="MoonRestore started. Check terminal for progress."
+  RESPOND MSG="🔄 MoonRestore running. Please wait... Restore in progress."
 
 [gcode_macro BACKUP_STATUS]
 gcode:
   RUN_SHELL_COMMAND CMD=moonbackup_status
-  RESPOND MSG="Backup status check initiated."
+  RESPOND MSG="🔍 Checking MoonBackup status..."
 EOF
     fi
     

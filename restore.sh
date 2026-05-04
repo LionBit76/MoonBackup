@@ -106,11 +106,13 @@ parse_config() {
     # Set defaults
     : ${BACKUP_PREFIX:="voron-backup"}
     : ${LOCAL_BACKUP_DIR:="$HOME/Backup"}
-    : ${MOONRAKER_SERVICE:="moonraker"}
-    : ${MOONRAKER_STOP_WAIT:=10}
-    : ${MOONRAKER_START_WAIT:=15}
     : ${LOG_LEVEL:="INFO"}
     : ${EMAIL_ENABLED:=0}
+    
+    # Moonraker control defaults (hardcoded since config section removed)
+    MOONRAKER_SERVICE="moonraker"
+    MOONRAKER_STOP_WAIT=10
+    MOONRAKER_START_WAIT=15
 }
 
 # Check if command exists
@@ -285,9 +287,7 @@ restore_local() {
     fi
     
     # Stop Moonraker before restore
-    if [ "$STOP_MOONRAKER_FOR_DB" = "1" ]; then
-        stop_moonraker
-    fi
+    stop_moonraker
     
     # Restore files
     log "INFO" "Copying files from backup..."

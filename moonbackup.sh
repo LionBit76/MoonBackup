@@ -123,10 +123,6 @@ parse_config() {
     : ${LOCAL_BACKUP_DIR:="$HOME/Backup"}
     : ${LOCAL_MAX_BACKUPS:=5}
     : ${LOCAL_COMPRESSION:=6}
-    : ${STOP_MOONRAKER_FOR_DB:=1}
-    : ${MOONRAKER_SERVICE:="moonraker"}
-    : ${MOONRAKER_STOP_WAIT:=10}
-    : ${MOONRAKER_START_WAIT:=15}
     : ${BACKUP_PREFIX:="voron-backup"}
     : ${BACKUP_INCLUDE_DATE:=1}
     : ${BACKUP_DATE_FORMAT:="%Y%m%d-%H%M%S"}
@@ -186,69 +182,6 @@ create_exclude_list() {
     
     # Return excludes as space-separated string
     printf "%s " "${excludes[@]}"
-}
-
-# Stop Moonraker
-stop_moonraker() {
-    if [ "$STOP_MOONRAKER_FOR_DB" = "1" ]; then
-        log "INFO" "Stopping Moonraker service..."
-        
-        # Check if systemd is available
-        if command_exists systemctl; then
-            sudo systemctl stop "$MOONRAKER_SERVICE" 2>/dev/null || true
-        else
-            # Try service command
-            if command_exists service; then
-                sudo service "$MOONRAKER_SERVICE" stop 2>/dev/null || true
-            fi
-        fi
-        
-        # Wait for Moonraker to stop
-        local wait_time=0
-        while [ "$wait_time" -lt "$MOONRAKER_STOP_WAIT" ]; do
-            if ! pgrep -f moonraker > /dev/null 2>&1; then
-                log "INFO" "Moonraker stopped successfully"
-                MOONRAKER_WAS_STOPPED=1
-                return 0
-            fi
-            sleep 1
-            wait_time=$((wait_time + 1))
-        done
-        
-        log "WARN" "Moonraker did not stop cleanly after $MOONRAKER_STOP_WAIT seconds"
-        MOONRAKER_WAS_STOPPED=1
-        return 1
-    fi
-    
-    MOONRAKER_WAS_STOPPED=0
-    return 0
-}
-
-# Start Moonraker
-start_moonraker() {
-    log "INFO" "Starting Moonraker service..."
-    
-    if command_exists systemctl; then
-        sudo systemctl start "$MOONRAKER_SERVICE" 2>/dev/null || true
-    else
-        if command_exists service; then
-            sudo service "$MOONRAKER_SERVICE" start 2>/dev/null || true
-        fi
-    fi
-    
-    # Wait for Moonraker to start
-    local wait_time=0
-    while [ "$wait_time" -lt "$MOONRAKER_START_WAIT" ]; do
-        if pgrep -f moonraker > /dev/null 2>&1; then
-            log "INFO" "Moonraker started successfully"
-            return 0
-        fi
-        sleep 1
-        wait_time=$((wait_time + 1))
-    done
-    
-    log "WARN" "Moonraker did not start within $MOONRAKER_START_WAIT seconds"
-    return 1
 }
 
 # Backup to local
@@ -617,7 +550,6 @@ show_status() {
 # ============================================
 
 # Initialize variables
-MOONRAKER_WAS_STOPPED=0
 BACKUP_STATUS=""
 BACKUP_SIZE=""
 BACKUP_DURATION=""
@@ -643,19 +575,6 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}       MoonBackup Starting              ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-
-# Check if --no-stop flag is set (for RUN_SHELL_COMMAND compatibility)
-NO_STOP=0
-for arg in "$@"; do
-    if [ "$arg" = "--no-stop" ]; then
-        NO_STOP=1
-    fi
-done
-
-# Stop Moonraker if needed for database backup (unless --no-stop flag is set)
-if [ "$NO_STOP" = "0" ] && [ "$STOP_MOONRAKER_FOR_DB" = "1" ] && { [ "$BACKUP_DATABASE" = "1" ] || [ "$BACKUP_HOME" = "1" ]; }; then
-    stop_moonraker
-fi
 
 # Create backups based on configuration
 local_success=1
@@ -747,13 +666,6 @@ if [ -n "$BACKUP_FILE" ]; then
 fi
 
 echo ""
-
-# Start Moonraker if we stopped it
-if [ "$MOONRAKER_WAS_STOPPED" = "1" ]; then
-    echo -e "${YELLOW}Moonraker was stopped for database backup.${NC}"
-    echo -e "${YELLOW}Starting Moonraker now...${NC}"
-    start_moonraker
-fi
 
 log "INFO" "MoonBackup finished with status: $BACKUP_STATUS"
 
