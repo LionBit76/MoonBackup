@@ -1,5 +1,5 @@
 #!/bin/bash
-# MoonBackup Installer v0.9.1
+# MoonBackup Installer v0.9.2
 # Created: 2024-05-04
 # Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
@@ -21,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}      MoonBackup Installer v0.9.1       ${NC}"
+echo -e "${GREEN}      MoonBackup Installer v0.9.2       ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
@@ -101,22 +101,23 @@ else
     cp "$PRINTER_CONFIG" "$CONFIG_DIR/.printer.cfg.bak.$(date +%Y%m%d-%H%M%S)"
     
     # Add macros at the end of the file
+    MOONBACKUP_PATH="$HOME/MoonBackup"
     cat >> "$PRINTER_CONFIG" << EOF
 
 # MoonBackup Macros
 [gcode_macro BACKUP]
 gcode:
-  RUN_SHELL_COMMAND CMD=bash ${SCRIPT_DIR}/moonbackup.sh
+  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/moonbackup.sh"
   RESPOND MSG="MoonBackup started. Check terminal for progress."
 
 [gcode_macro RESTORE]
 gcode:
-  RUN_SHELL_COMMAND CMD=bash ${SCRIPT_DIR}/restore.sh
+  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/restore.sh"
   RESPOND MSG="MoonRestore started. Check terminal for progress."
 
 [gcode_macro BACKUP_STATUS]
 gcode:
-  RUN_SHELL_COMMAND CMD=bash ${SCRIPT_DIR}/moonbackup.sh --status
+  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/moonbackup.sh --status"
   RESPOND MSG="Backup status check initiated."
 EOF
     
@@ -145,7 +146,6 @@ origin: https://github.com/LionBit76/MoonBackup.git
 path: ~/MoonBackup
 managed_services: 
 primary_branch: main
-is_active: true
 EOF
     
     echo -e "${GREEN}✓ MoonBackup update_manager added to moonraker.conf${NC}"
