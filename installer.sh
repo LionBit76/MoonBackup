@@ -1,5 +1,5 @@
 #!/bin/bash
-# MoonBackup Installer v0.9.3
+# MoonBackup Installer v0.9.4
 # Created: 2024-05-04
 # Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
@@ -21,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}      MoonBackup Installer v0.9.3       ${NC}"
+echo -e "${GREEN}      MoonBackup Installer v0.9.4       ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
@@ -100,57 +100,89 @@ else
     # Backup printer.cfg with leading dot to hide it
     cp "$PRINTER_CONFIG" "$CONFIG_DIR/.printer.cfg.bak.$(date +%Y%m%d-%H%M%S)"
     
-    # Find the SAVE_CONFIG marker and insert macros before it
+    # Find the SAVE_CONFIG marker and insert shell commands + macros before it
     MOONBACKUP_PATH="$HOME/MoonBackup"
     SAVE_CONFIG_LINE=$(grep -n "#\*# <---------------------- SAVE_CONFIG" "$PRINTER_CONFIG" | head -1 | cut -d: -f1)
     
     if [ -n "$SAVE_CONFIG_LINE" ]; then
-        # Create temp file with macros inserted before SAVE_CONFIG
+        # Create temp file with shell commands + macros inserted before SAVE_CONFIG
         head -n $((SAVE_CONFIG_LINE - 1)) "$PRINTER_CONFIG" > "$PRINTER_CONFIG.tmp"
         
-        # Create macros file with expanded variables
-        MOONBACKUP_MACROS_FILE=$(mktemp)
-        cat > "$MOONBACKUP_MACROS_FILE" << EOF
+        # Create shell commands and macros file with expanded variables
+        MOONBACKUP_COMMANDS_FILE=$(mktemp)
+        cat > "$MOONBACKUP_COMMANDS_FILE" << EOF
+
+# MoonBackup Shell Commands
+[gcode_shell_command moonbackup_backup]
+command: bash ${MOONBACKUP_PATH}/moonbackup.sh
+timeout: 60
+verbose: True
+
+[gcode_shell_command moonbackup_restore]
+command: bash ${MOONBACKUP_PATH}/restore.sh
+timeout: 120
+verbose: True
+
+[gcode_shell_command moonbackup_status]
+command: bash ${MOONBACKUP_PATH}/moonbackup.sh --status
+timeout: 10
+verbose: True
 
 # MoonBackup Macros
 [gcode_macro BACKUP]
 gcode:
-  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/moonbackup.sh"
+  RUN_SHELL_COMMAND CMD=moonbackup_backup
   RESPOND MSG="MoonBackup started. Check terminal for progress."
 
 [gcode_macro RESTORE]
 gcode:
-  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/restore.sh"
+  RUN_SHELL_COMMAND CMD=moonbackup_restore
   RESPOND MSG="MoonRestore started. Check terminal for progress."
 
 [gcode_macro BACKUP_STATUS]
 gcode:
-  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/moonbackup.sh --status"
+  RUN_SHELL_COMMAND CMD=moonbackup_status
   RESPOND MSG="Backup status check initiated."
 EOF
         
-        cat "$MOONBACKUP_MACROS_FILE" >> "$PRINTER_CONFIG.tmp"
+        cat "$MOONBACKUP_COMMANDS_FILE" >> "$PRINTER_CONFIG.tmp"
         tail -n +$SAVE_CONFIG_LINE "$PRINTER_CONFIG" >> "$PRINTER_CONFIG.tmp"
         mv "$PRINTER_CONFIG.tmp" "$PRINTER_CONFIG"
-        rm -f "$MOONBACKUP_MACROS_FILE"
+        rm -f "$MOONBACKUP_COMMANDS_FILE"
     else
         # If no SAVE_CONFIG marker, append to end of file
         cat >> "$PRINTER_CONFIG" << EOF
 
+# MoonBackup Shell Commands
+[gcode_shell_command moonbackup_backup]
+command: bash ${MOONBACKUP_PATH}/moonbackup.sh
+timeout: 60
+verbose: True
+
+[gcode_shell_command moonbackup_restore]
+command: bash ${MOONBACKUP_PATH}/restore.sh
+timeout: 120
+verbose: True
+
+[gcode_shell_command moonbackup_status]
+command: bash ${MOONBACKUP_PATH}/moonbackup.sh --status
+timeout: 10
+verbose: True
+
 # MoonBackup Macros
 [gcode_macro BACKUP]
 gcode:
-  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/moonbackup.sh"
+  RUN_SHELL_COMMAND CMD=moonbackup_backup
   RESPOND MSG="MoonBackup started. Check terminal for progress."
 
 [gcode_macro RESTORE]
 gcode:
-  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/restore.sh"
+  RUN_SHELL_COMMAND CMD=moonbackup_restore
   RESPOND MSG="MoonRestore started. Check terminal for progress."
 
 [gcode_macro BACKUP_STATUS]
 gcode:
-  RUN_SHELL_COMMAND CMD="bash ${MOONBACKUP_PATH}/moonbackup.sh --status"
+  RUN_SHELL_COMMAND CMD=moonbackup_status
   RESPOND MSG="Backup status check initiated."
 EOF
     fi
