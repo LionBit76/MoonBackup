@@ -1,5 +1,5 @@
 #!/bin/bash
-# MoonBackup Installer v0.9.9
+# MoonBackup Installer v0.9.10
 # Created: 2024-05-04
 # Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
@@ -20,8 +20,13 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Check if command exists
+command_exists() {
+    command -v "$1" > /dev/null 2>&1
+}
+
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}      MoonBackup Installer v0.9.9       ${NC}"
+echo -e "${GREEN}      MoonBackup Installer v0.9.10      ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
@@ -103,8 +108,8 @@ else
         if [ ! -f "$SERVICE_FILE" ]; then
             # Create service file with correct user path
             # Create service file with correct paths
-            MOONBACKUP_SCRIPT="$SCRIPT_DIR/db_preboot_backup.sh"
-            sudo bash -c "cat > '$SERVICE_FILE' << INNEREOF
+            # Use tee to write with sudo
+            sudo tee "$SERVICE_FILE" > /dev/null << EOF
 [Unit]
 Description=MoonBackup Database Pre-Boot Backup
 After=network-online.target
@@ -114,13 +119,13 @@ Before=moonraker.service
 Type=oneshot
 User=$CURRENT_USER
 ExecStartPre=/bin/sleep 5
-ExecStart=$MOONBACKUP_SCRIPT
+ExecStart=$SCRIPT_DIR/db_preboot_backup.sh
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-INNEREOF"
+EOF
             
             sudo systemctl daemon-reload
             sudo systemctl enable db_preboot_backup.service
@@ -312,9 +317,6 @@ echo ""
 
 # Restart Moonraker to apply changes
 echo "Restarting Moonraker..."
-command_exists() {
-    command -v "$1" > /dev/null 2>&1
-}
 
 if command_exists systemctl; then
     sudo systemctl restart moonraker
