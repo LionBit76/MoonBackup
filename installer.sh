@@ -10,6 +10,7 @@ CONFIG_DIR="$HOME_DIR/printer_data/config"
 MOONBACKUP_CONFIG="$CONFIG_DIR/MoonBackup.cfg"
 BACKUP_DIR="$HOME_DIR/Backup"
 PRINTER_CONFIG="$CONFIG_DIR/printer.cfg"
+MOONRAKER_CONFIG="$CONFIG_DIR/moonraker.conf"
 
 # Colors for output
 RED='\033[0;31m'
@@ -85,7 +86,7 @@ fi
 
 # Register macros in printer.cfg
 echo ""
-echo "Checking printer.cfg for MoonBackup configurations..."
+echo "Checking printer.cfg for MoonBackup macros..."
 
 # Check if macros already exist
 if grep -q "gcode_macro BACKUP" "$PRINTER_CONFIG" 2>/dev/null; then
@@ -94,8 +95,9 @@ else
     echo ""
     echo "Adding MoonBackup macros to printer.cfg..."
     
-    # Backup printer.cfg
+    # Backup printer.cfg with leading dot to hide it
     cp "$PRINTER_CONFIG" "$PRINTER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)"
+    mv "$PRINTER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)" ".$PRINTER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)"
     
     # Add macros at the end of the file
     cat >> "$PRINTER_CONFIG" << EOF
@@ -118,18 +120,22 @@ gcode:
 EOF
     
     echo -e "${GREEN}✓ MoonBackup macros added to printer.cfg${NC}"
-    echo -e "${YELLOW}  Original printer.cfg backed up as $PRINTER_CONFIG.bak.<timestamp>${NC}"
+    echo -e "${YELLOW}  Original printer.cfg backed up as .$PRINTER_CONFIG.bak.<timestamp>${NC}"
 fi
 
-# Check if update_manager entry already exists
-if grep -q "update_manager MoonBackup" "$PRINTER_CONFIG" 2>/dev/null; then
-    echo -e "${YELLOW}✓ MoonBackup update_manager already registered in printer.cfg${NC}"
+# Check if update_manager entry already exists in moonraker.conf
+if grep -q "update_manager MoonBackup" "$MOONRAKER_CONFIG" 2>/dev/null; then
+    echo -e "${YELLOW}✓ MoonBackup update_manager already registered in moonraker.conf${NC}"
 else
     echo ""
-    echo "Adding MoonBackup update_manager to printer.cfg..."
+    echo "Adding MoonBackup update_manager to moonraker.conf..."
+    
+    # Backup moonraker.conf with leading dot to hide it
+    cp "$MOONRAKER_CONFIG" "$MOONRAKER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)"
+    mv "$MOONRAKER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)" ".$MOONRAKER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)"
     
     # Add update_manager at the end of the file
-    cat >> "$PRINTER_CONFIG" << EOF
+    cat >> "$MOONRAKER_CONFIG" << EOF
 
 # MoonBackup Update Manager
 [update_manager MoonBackup]
@@ -142,7 +148,8 @@ primary_branch: main
 is_active: true
 EOF
     
-    echo -e "${GREEN}✓ MoonBackup update_manager added to printer.cfg${NC}"
+    echo -e "${GREEN}✓ MoonBackup update_manager added to moonraker.conf${NC}"
+    echo -e "${YELLOW}  Original moonraker.conf backed up as .$MOONRAKER_CONFIG.bak.<timestamp>${NC}"
 fi
 
 # Create config directory for MoonBackup if it doesn't exist
@@ -176,3 +183,18 @@ echo "Configuration file location: $MOONBACKUP_CONFIG"
 echo "Backup directory: $BACKUP_DIR"
 echo "Scripts location: $SCRIPT_DIR"
 echo ""
+
+# Restart Moonraker to apply changes
+echo "Restarting Moonraker..."
+if command_exists systemctl; then
+    sudo systemctl restart moonraker
+    echo -e "${GREEN}✓ Moonraker restarted${NC}"
+else
+    if command_exists service; then
+        sudo service moonraker restart
+        echo -e "${GREEN}✓ Moonraker restarted${NC}"
+    else
+        echo -e "${YELLOW}Could not restart Moonraker. Please restart it manually:${NC}"
+        echo "  sudo systemctl restart moonraker"
+    fi
+fi
