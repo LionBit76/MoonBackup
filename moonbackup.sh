@@ -85,12 +85,6 @@ check_pid() {
 # Cleanup on exit
 cleanup() {
     rm -f "$PID_FILE"
-    
-    # Restart Moonraker if we stopped it
-    if [ "$MOONRAKER_WAS_STOPPED" = "1" ]; then
-        log "INFO" "Restarting Moonraker..."
-        start_moonraker
-    fi
 }
 
 trap cleanup EXIT
@@ -650,8 +644,16 @@ echo -e "${GREEN}       MoonBackup Starting              ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
-# Stop Moonraker if needed for database backup
-if [ "$STOP_MOONRAKER_FOR_DB" = "1" ] && { [ "$BACKUP_DATABASE" = "1" ] || [ "$BACKUP_HOME" = "1" ]; }; then
+# Check if --no-stop flag is set (for RUN_SHELL_COMMAND compatibility)
+NO_STOP=0
+for arg in "$@"; do
+    if [ "$arg" = "--no-stop" ]; then
+        NO_STOP=1
+    fi
+done
+
+# Stop Moonraker if needed for database backup (unless --no-stop flag is set)
+if [ "$NO_STOP" = "0" ] && [ "$STOP_MOONRAKER_FOR_DB" = "1" ] && { [ "$BACKUP_DATABASE" = "1" ] || [ "$BACKUP_HOME" = "1" ]; }; then
     stop_moonraker
 fi
 
@@ -745,6 +747,14 @@ if [ -n "$BACKUP_FILE" ]; then
 fi
 
 echo ""
+
+# Start Moonraker if we stopped it
+if [ "$MOONRAKER_WAS_STOPPED" = "1" ]; then
+    echo -e "${YELLOW}Moonraker was stopped for database backup.${NC}"
+    echo -e "${YELLOW}Starting Moonraker now...${NC}"
+    start_moonraker
+fi
+
 log "INFO" "MoonBackup finished with status: $BACKUP_STATUS"
 
 exit 0

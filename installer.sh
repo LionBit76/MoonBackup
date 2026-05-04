@@ -1,5 +1,5 @@
 #!/bin/bash
-# MoonBackup Installer v0.9.4
+# MoonBackup Installer v0.9.5
 # Created: 2024-05-04
 # Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
@@ -21,7 +21,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}      MoonBackup Installer v0.9.4       ${NC}"
+echo -e "${GREEN}      MoonBackup Installer v0.9.5       ${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
@@ -114,13 +114,13 @@ else
 
 # MoonBackup Shell Commands
 [gcode_shell_command moonbackup_backup]
-command: bash ${MOONBACKUP_PATH}/moonbackup.sh
-timeout: 60
+command: bash ${MOONBACKUP_PATH}/moonbackup.sh --no-stop
+timeout: 120
 verbose: True
 
 [gcode_shell_command moonbackup_restore]
 command: bash ${MOONBACKUP_PATH}/restore.sh
-timeout: 120
+timeout: 180
 verbose: True
 
 [gcode_shell_command moonbackup_status]
@@ -155,13 +155,13 @@ EOF
 
 # MoonBackup Shell Commands
 [gcode_shell_command moonbackup_backup]
-command: bash ${MOONBACKUP_PATH}/moonbackup.sh
-timeout: 60
+command: bash ${MOONBACKUP_PATH}/moonbackup.sh --no-stop
+timeout: 120
 verbose: True
 
 [gcode_shell_command moonbackup_restore]
 command: bash ${MOONBACKUP_PATH}/restore.sh
-timeout: 120
+timeout: 180
 verbose: True
 
 [gcode_shell_command moonbackup_status]
