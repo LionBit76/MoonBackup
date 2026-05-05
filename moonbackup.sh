@@ -159,6 +159,10 @@ create_exclude_list() {
     excludes+=("--exclude=./Backup")
     excludes+=("--exclude=./MoonBackup")
     
+    # Always exclude cache and socket files (avoid permission errors)
+    excludes+=("--exclude=./.cache")
+    excludes+=("--exclude=*.sock")
+    
     # Exclude based on configuration
     if [ "$BACKUP_HOME" != "1" ]; then
         excludes+=("--exclude=./")
