@@ -348,7 +348,59 @@ backup_scp() {
     fi
 }
 
-# Backup to Nextcloud via WebDAV
+# Helper function for Nextcloud TUS chunked upload
+nextcloud_upload_chunk_tus() {
+    local chunk_file="$1"
+    local uploads_url="$2"
+    local offset_hex="$3"
+    local max_retries="$4"
+    local upload_delay="$5"
+    local backoff_base="$6"
+    
+    local retry_count=0
+    local chunk_ok=0
+    local current_delay="$upload_delay"
+    
+    while [ "$retry_count" -le "$max_retries" ]; do
+        log "DEBUG" "Uploading chunk at offset ${offset_hex} (attempt $((retry_count + 1))/$((max_retries + 1))..."
+        
+        if curl -sS -f -T "$chunk_file" -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+            -X PUT "${uploads_url}/${offset_hex}" 2>> "$LOG_FILE"; then
+            log "DEBUG" "Chunk at offset ${offset_hex} uploaded successfully"
+            chunk_ok=1
+            break
+        else
+            if [ "$retry_count" -lt "$max_retries" ]; then
+                log "WARN" "Chunk at offset ${offset_hex} failed, retrying in ${current_delay}s..."
+                sleep "$current_delay"
+                # Simple backoff: multiply delay by backoff_base each retry
+                current_delay=$((current_delay * backoff_base))
+            else
+                log "ERROR" "Failed to upload chunk at offset ${offset_hex} after $max_retries retries"
+            fi
+            retry_count=$((retry_count + 1))
+        fi
+    done
+    
+    return $((chunk_ok == 1 ? 0 : 1))
+}
+
+# Helper function for single file upload to Nextcloud
+upload_single_nextcloud() {
+    local file="$1"
+    local dest="$2"
+    
+    log "DEBUG" "Uploading file to: $dest"
+    
+    if curl -sS -f -T "$file" -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+        -X PUT "$dest" 2>> "$LOG_FILE"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Backup to Nextcloud via WebDAV with TUS protocol support
 backup_nextcloud() {
     if [ "$DEST_NEXTCLOUD" != "1" ]; then
         log "INFO" "Nextcloud backup is disabled"
@@ -371,25 +423,9 @@ backup_nextcloud() {
     local start_time
     start_time=$(date +%s)
     
-    # Ensure the target directory exists on Nextcloud
+    # Prepare URLs
     local webdav_url="${NEXTCLOUD_URL%/}"
     local upload_path="${NEXTCLOUD_PATH#/}"
-    
-    # Create the full path for directory creation
-    local dir_url="${webdav_url}/${upload_path}"
-    
-    # Create directory if it doesn't exist
-    local create_dir_cmd
-    create_dir_cmd=$(printf 'curl -sS -f -X MKCOL -u "%s:%s" "%s"' \
-        "$NEXTCLOUD_USER" "$NEXTCLOUD_PASSWORD" "$dir_url")
-    
-    log "DEBUG" "Checking/creating directory: $create_dir_cmd"
-    
-    # Try to create the directory (MKCOL is idempotent - safe to call multiple times)
-    if ! eval "$create_dir_cmd" 2>> "$LOG_FILE"; then
-        # Directory might already exist, which is fine
-        log "DEBUG" "Directory may already exist, continuing..."
-    fi
     
     # Find the latest local backup file
     local backup_file
@@ -407,105 +443,102 @@ backup_nextcloud() {
     
     local filename
     filename=$(basename "$backup_file")
+    local file_size
+    file_size=$(stat -c%s "$backup_file" 2>/dev/null || echo 0)
     
-    # Full destination URL
-    local dest_url="${webdav_url}/${upload_path}/${filename}"
-    
-    log "DEBUG" "WebDAV destination URL: $dest_url"
+    # Full destination URL for final file
+    local final_dest="${webdav_url}/${upload_path}/${filename}"
     
     # Check chunk size setting
     if [ "$NEXTCLOUD_CHUNK_SIZE" -gt 0 ] 2>/dev/null; then
-        # Chunked upload for large files
+        # TUS protocol for chunked uploads
         local chunk_size_kb="$NEXTCLOUD_CHUNK_SIZE"
         local chunk_size_bytes=$((chunk_size_kb * 1024))
-        local file_size
-        file_size=$(stat -c%s "$backup_file" 2>/dev/null || echo 0)
         
         if [ "$file_size" -gt "$chunk_size_bytes" ]; then
-            log "INFO" "Uploading large file in chunks (chunk size: ${chunk_size_kb}KB)..."
+            log "INFO" "Uploading large file via TUS protocol (chunk size: ${chunk_size_kb}KB)..."
             
-            # Create temporary directory for chunks
-            local chunk_dir
-            chunk_dir=$(mktemp -d)
+            # Generate unique upload ID
+            local upload_id="moonbackup_$(date +%s%N)"
+            local uploads_url="${webdav_url}/uploads/${upload_id}"
             
-            # Split file into chunks
-            split -b "${chunk_size_bytes}" "$backup_file" "${chunk_dir}/chunk_" 2>> "$LOG_FILE"
-            local split_exit=$?
-            
-            if [ "$split_exit" -ne 0 ]; then
-                log "ERROR" "Failed to split file into chunks"
-                rm -rf "$chunk_dir"
+            # Step 1: Create upload directory
+            log "DEBUG" "Creating TUS upload directory: ${uploads_url}/"
+            if ! curl -sS -f -X MKCOL -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+                "${uploads_url}/" 2>> "$LOG_FILE"; then
+                log "ERROR" "Failed to create TUS upload directory"
                 return 1
             fi
             
-            # Upload each chunk with retry logic
-            local chunk_num=1
+            # Step 2: Upload chunks
+            local offset=0
             local all_chunks_ok=1
             
-            for chunk_file in "${chunk_dir}"/chunk_*; do
-                local chunk_dest="${dest_url}.part${chunk_num}"
-                local upload_cmd
-                upload_cmd=$(printf 'curl -sS -f -T "%s" -u "%s:%s" -X PUT "%s"' \
-                    "$chunk_file" "$NEXTCLOUD_USER" "$NEXTCLOUD_PASSWORD" "$chunk_dest")
+            while [ "$offset" -lt "$file_size" ]; do
+                local remaining=$((file_size - offset))
+                local current_chunk_size=$((chunk_size_bytes < remaining ? chunk_size_bytes : remaining))
                 
-                local retry_count=0
-                local max_retries="$NEXTCLOUD_MAX_RETRIES"
-                local backoff="$NEXTCLOUD_RETRY_BACKOFF"
-                local chunk_ok=0
-                
-                while [ "$retry_count" -le "$max_retries" ]; do
-                    log "DEBUG" "Uploading chunk $chunk_num (attempt $((retry_count + 1))/$((max_retries + 1))..."
-                    
-                    if eval "$upload_cmd" 2>> "$LOG_FILE"; then
-                        log "DEBUG" "Chunk $chunk_num uploaded successfully"
-                        chunk_ok=1
-                        break
-                    else
-                        if [ "$retry_count" -lt "$max_retries" ]; then
-                            local delay=$((NEXTCLOUD_UPLOAD_DELAY * (backoff ** retry_count)))
-                            log "WARN" "Chunk $chunk_num failed, retrying in ${delay}s... (attempt $((retry_count + 1))/$((max_retries + 1)))"
-                            sleep "$delay"
-                        else
-                            log "ERROR" "Failed to upload chunk $chunk_num after $max_retries retries"
-                        fi
-                        retry_count=$((retry_count + 1))
-                    fi
-                done
-                
-                if [ "$chunk_ok" -eq 0 ]; then
+                # Extract chunk using dd
+                local chunk_file="${backup_file}.chunk_${offset}"
+                if ! dd if="$backup_file" of="$chunk_file" bs="$current_chunk_size" count=1 skip="$offset" 2>/dev/null; then
+                    log "ERROR" "Failed to extract chunk at offset $offset"
+                    rm -f "$chunk_file"
                     all_chunks_ok=0
                     break
                 fi
                 
-                # Add delay between chunks to prevent server timeouts
-                if [ "$NEXTCLOUD_UPLOAD_DELAY" -gt 0 ] 2>/dev/null; then
-                    log "DEBUG" "Waiting ${NEXTCLOUD_UPLOAD_DELAY}s before next chunk..."
-                    sleep "$NEXTCLOUD_UPLOAD_DELAY"
+                # Format offset as 16-digit hexadecimal with leading zeros
+                local offset_hex=$(printf "%016x" "$offset")
+                
+                # Upload chunk with retry
+                if ! nextcloud_upload_chunk_tus "$chunk_file" "$uploads_url" "$offset_hex" \
+                    "$NEXTCLOUD_MAX_RETRIES" "$NEXTCLOUD_UPLOAD_DELAY" "$NEXTCLOUD_RETRY_BACKOFF"; then
+                    log "ERROR" "Failed to upload chunk at offset $offset"
+                    rm -f "$chunk_file"
+                    all_chunks_ok=0
+                    break
                 fi
                 
-                chunk_num=$((chunk_num + 1))
+                rm -f "$chunk_file"
+                offset=$((offset + current_chunk_size))
             done
             
-            # Cleanup chunks
-            rm -rf "$chunk_dir"
+            # Cleanup temporary chunks
+            rm -f "${backup_file}.chunk_"*
             
             if [ "$all_chunks_ok" -eq 0 ]; then
-                log "ERROR" "Nextcloud chunked upload failed"
+                log "ERROR" "Nextcloud TUS chunked upload failed"
+                # Cleanup upload directory
+                curl -sS -f -X DELETE -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+                    "${uploads_url}/" >/dev/null 2>&1
                 return 1
             fi
             
-            # Notify that chunks are uploaded (no assembly needed - Nextcloud handles it)
-            log "INFO" "All chunks uploaded - Nextcloud will assemble the file"
+            # Step 3: Finalize upload with MOVE
+            log "DEBUG" "Finalizing TUS upload with MOVE to: $final_dest"
+            if ! curl -sS -f -X MOVE -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+                -H "Destination: ${final_dest}" -H "Overwrite: T" \
+                "${uploads_url}/" 2>> "$LOG_FILE"; then
+                log "ERROR" "Failed to finalize TUS upload (MOVE operation)"
+                # Cleanup upload directory
+                curl -sS -f -X DELETE -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+                    "${uploads_url}/" >/dev/null 2>&1
+                return 1
+            fi
+            
+            log "INFO" "TUS upload completed and finalized"
         else
-            # Single upload (file is small enough)
-            upload_single_nextcloud "$backup_file" "$dest_url"
+            # File is small enough for single upload
+            upload_single_nextcloud "$backup_file" "$final_dest"
         fi
     else
         # Single upload (no chunking)
-        upload_single_nextcloud "$backup_file" "$dest_url"
+        upload_single_nextcloud "$backup_file" "$final_dest"
     fi
     
-    if [ $? -eq 0 ]; then
+    local upload_result=$?
+    
+    if [ "$upload_result" -eq 0 ]; then
         local end_time
         end_time=$(date +%s)
         local duration=$((end_time - start_time))
@@ -514,24 +547,6 @@ backup_nextcloud() {
         return 0
     else
         log "ERROR" "Nextcloud backup failed"
-        return 1
-    fi
-}
-
-# Helper function for single file upload to Nextcloud
-upload_single_nextcloud() {
-    local file="$1"
-    local dest="$2"
-    
-    local upload_cmd
-    upload_cmd=$(printf 'curl -sS -f -T "%s" -u "%s:%s" -X PUT "%s"' \
-        "$file" "$NEXTCLOUD_USER" "$NEXTCLOUD_PASSWORD" "$dest")
-    
-    log "DEBUG" "Executing: $upload_cmd"
-    
-    if eval "$upload_cmd" 2>> "$LOG_FILE"; then
-        return 0
-    else
         return 1
     fi
 }
