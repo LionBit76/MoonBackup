@@ -118,10 +118,11 @@ parse_config() {
     : ${BACKUP_TYPE:="full"}
     : ${INCREMENTAL_FULL_KEEP:=3}
     : ${DEST_LOCAL:=1}
-    : ${DEST_GITHUB:=0}
     : ${DEST_SCP:=0}
     : ${DEST_NEXTCLOUD:=0}
     : ${NEXTCLOUD_UPLOAD_DELAY:=1}
+    : ${NEXTCLOUD_MAX_RETRIES:=3}
+    : ${NEXTCLOUD_RETRY_BACKOFF:=2}
     : ${LOCAL_BACKUP_DIR:="$HOME/Backup"}
     : ${LOCAL_MAX_BACKUPS:=5}
     : ${LOCAL_COMPRESSION:=6}
@@ -292,81 +293,6 @@ rotate_backups() {
     fi
 }
 
-# Backup to GitHub
-backup_github() {
-    if [ "$DEST_GITHUB" != "1" ]; then
-        log "INFO" "GitHub backup is disabled"
-        return 0
-    fi
-    
-    if [ -z "$GITHUB_TOKEN" ] || [ -z "$GITHUB_REPO" ]; then
-        log "ERROR" "GitHub backup enabled but token or repo not configured"
-        return 1
-    fi
-    
-    log "INFO" "Starting GitHub backup..."
-    
-    # Create a temporary directory for the backup
-    local temp_dir
-    temp_dir=$(mktemp -d)
-    local temp_backup="$temp_dir/backup.tar.gz"
-    
-    # Create the backup
-    local excludes
-    excludes=$(create_exclude_list)
-    
-    local tar_cmd="tar -czf \"$temp_backup\" -C \"$HOME\" ${excludes}"
-    
-    if [ "$BACKUP_HOME" = "1" ]; then
-        tar_cmd+=" ."
-    else
-        [ "$BACKUP_PRINTER_DATA" = "1" ] && tar_cmd+=" ./printer_data"
-        [ "$BACKUP_TIMELAPSE" = "1" ] && tar_cmd+=" ./timelapse"
-        [ "$BACKUP_GCODES" = "1" ] && tar_cmd+=" ./printer_data/gcodes"
-    fi
-    
-    if ! eval "$tar_cmd" 2>> "$LOG_FILE"; then
-        log "ERROR" "Failed to create temporary backup for GitHub"
-        rm -rf "$temp_dir"
-        return 1
-    fi
-    
-    # Get current date for commit message
-    local commit_msg
-    commit_msg=$(echo "$GITHUB_COMMIT_MSG" | sed "s/%DATE%/$(date '+%Y-%m-%d %H:%M:%S')/")
-    local branch="$GITHUB_BRANCH"
-    local repo_url="https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
-    
-    # Initialize git repo in temp dir
-    cd "$temp_dir" || return 1
-    git init -q
-    git config user.email "moonbackup@voron.local"
-    git config user.name "MoonBackup"
-    
-    # Add backup file to git
-    git add backup.tar.gz
-    git commit -m "$commit_msg" -q
-    
-    # Push to GitHub
-    local push_output
-    push_output=$(git push -f "$repo_url" "HEAD:$branch" 2>&1)
-    local push_exit=$?
-    
-    cd - > /dev/null || return 1
-    
-    if [ "$push_exit" -eq 0 ]; then
-        log "SUCCESS" "GitHub backup completed"
-        BACKUP_STATUS="SUCCESS"
-    else
-        log "ERROR" "GitHub backup failed: $push_output"
-        BACKUP_STATUS="FAILED"
-    fi
-    
-    # Cleanup
-    rm -rf "$temp_dir"
-    return "$push_exit"
-}
-
 # Backup via SCP
 backup_scp() {
     if [ "$DEST_SCP" != "1" ]; then
@@ -512,7 +438,7 @@ backup_nextcloud() {
                 return 1
             fi
             
-            # Upload each chunk
+            # Upload each chunk with retry logic
             local chunk_num=1
             local all_chunks_ok=1
             
@@ -522,12 +448,31 @@ backup_nextcloud() {
                 upload_cmd=$(printf 'curl -sS -f -T "%s" -u "%s:%s" -X PUT "%s"' \
                     "$chunk_file" "$NEXTCLOUD_USER" "$NEXTCLOUD_PASSWORD" "$chunk_dest")
                 
-                log "DEBUG" "Uploading chunk $chunk_num..."
+                local retry_count=0
+                local max_retries="$NEXTCLOUD_MAX_RETRIES"
+                local backoff="$NEXTCLOUD_RETRY_BACKOFF"
+                local chunk_ok=0
                 
-                if eval "$upload_cmd" 2>> "$LOG_FILE"; then
-                    log "DEBUG" "Chunk $chunk_num uploaded successfully"
-                else
-                    log "ERROR" "Failed to upload chunk $chunk_num"
+                while [ "$retry_count" -le "$max_retries" ]; do
+                    log "DEBUG" "Uploading chunk $chunk_num (attempt $((retry_count + 1))/$((max_retries + 1))..."
+                    
+                    if eval "$upload_cmd" 2>> "$LOG_FILE"; then
+                        log "DEBUG" "Chunk $chunk_num uploaded successfully"
+                        chunk_ok=1
+                        break
+                    else
+                        if [ "$retry_count" -lt "$max_retries" ]; then
+                            local delay=$((NEXTCLOUD_UPLOAD_DELAY * (backoff ** retry_count)))
+                            log "WARN" "Chunk $chunk_num failed, retrying in ${delay}s... (attempt $((retry_count + 1))/$((max_retries + 1)))"
+                            sleep "$delay"
+                        else
+                            log "ERROR" "Failed to upload chunk $chunk_num after $max_retries retries"
+                        fi
+                        retry_count=$((retry_count + 1))
+                    fi
+                done
+                
+                if [ "$chunk_ok" -eq 0 ]; then
                     all_chunks_ok=0
                     break
                 fi
@@ -624,7 +569,6 @@ send_email() {
     # Add destination info
     body+="Backup Destinations:\n"
     [ "$DEST_LOCAL" = "1" ] && body+="  - Local: $LOCAL_BACKUP_DIR\n"
-    [ "$DEST_GITHUB" = "1" ] && body+="  - GitHub: $GITHUB_REPO\n"
     [ "$DEST_SCP" = "1" ] && body+="  - SCP: ${SCP_USER}@${SCP_HOST}:${SCP_PATH}\n"
     [ "$DEST_NEXTCLOUD" = "1" ] && body+="  - Nextcloud: ${NEXTCLOUD_URL}${NEXTCLOUD_PATH}\n"
     
@@ -759,7 +703,6 @@ echo ""
 
 # Create backups based on configuration
 local_success=1
-github_success=1
 scp_success=1
 nextcloud_success=1
 
@@ -768,14 +711,6 @@ if [ "$DEST_LOCAL" = "1" ]; then
     echo -e "${CYAN}Creating local backup...${NC}"
     backup_local
     local_success=$?
-fi
-
-# GitHub backup
-github_success=0
-if [ "$DEST_GITHUB" = "1" ]; then
-    echo -e "${CYAN}Creating GitHub backup...${NC}"
-    backup_github
-    github_success=$?
 fi
 
 # SCP backup
@@ -796,8 +731,6 @@ fi
 
 # Determine overall status
 if [ "$DEST_LOCAL" = "1" ] && [ "$local_success" -ne 0 ]; then
-    BACKUP_STATUS="FAILED"
-elif [ "$DEST_GITHUB" = "1" ] && [ "$github_success" -ne 0 ]; then
     BACKUP_STATUS="FAILED"
 elif [ "$DEST_SCP" = "1" ] && [ "$scp_success" -ne 0 ]; then
     BACKUP_STATUS="FAILED"
@@ -832,13 +765,6 @@ echo "Results:"
         echo -e "  ${GREEN}✓ Local backup: SUCCESS${NC}"
     else
         echo -e "  ${RED}✗ Local backup: FAILED${NC}"
-    fi
-}
-[ "$DEST_GITHUB" = "1" ] && {
-    if [ "$github_success" -eq 0 ]; then
-        echo -e "  ${GREEN}✓ GitHub backup: SUCCESS${NC}"
-    else
-        echo -e "  ${RED}✗ GitHub backup: FAILED${NC}"
     fi
 }
 [ "$DEST_SCP" = "1" ] && {

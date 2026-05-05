@@ -8,7 +8,7 @@ A comprehensive backup and restore solution for VORON 3D printers running Mainsa
 
 - **Full System Backup**: Backup your entire home directory or select specific directories
 - **Multiple Backup Types**: Full or incremental backups
-- **Multiple Destinations**: Local storage, GitHub, SCP to remote server
+- **Multiple Destinations**: Local storage, SCP, **Nextcloud (WebDAV)** to remote server
 - **Selective Backup**: Choose what to include/exclude (timelapse, gcodes, logs, etc.)
 - **Moonraker Integration**: Stops Moonraker before database backup and restarts it afterward
 - **Email Notifications**: Get notified about backup status with config file attachment
@@ -23,6 +23,7 @@ A comprehensive backup and restore solution for VORON 3D printers running Mainsa
 - G-Code Shell Command must be installed (required for RUN_SHELL_COMMAND)
 - git (for GitHub backups)
 - tar, gzip (for compression)
+- curl (for Nextcloud WebDAV uploads)
 - Optional: sendmail, mail, or swaks (for email notifications)
 
 ### Install G-Code Shell Command (if not installed)
@@ -97,8 +98,8 @@ Enable/disable backup destinations:
 
 ```ini
 DEST_LOCAL=1              # Local backup to ~/Backup
-DEST_GITHUB=0            # Backup to GitHub
 DEST_SCP=0               # Backup via SCP
+DEST_NEXTCLOUD=0         # Backup to Nextcloud via WebDAV
 ```
 
 ### Local Backup Settings
@@ -109,22 +110,6 @@ LOCAL_MAX_BACKUPS=5      # Maximum number of backups to keep (0 = unlimited)
 LOCAL_COMPRESSION=6      # Compression level (0-9)
 ```
 
-### GitHub Backup Settings
-
-```ini
-GITHUB_TOKEN=""          # Personal Access Token (classic)
-GITHUB_REPO=""           # Repository in format: username/repo-name
-GITHUB_BRANCH="main"     # Branch to push backups to
-GITHUB_COMMIT_MSG="MoonBackup - %DATE%"
-```
-
-To create a GitHub token:
-1. Go to https://github.com/settings/tokens
-2. Click "Generate new token (classic)"
-3. Give it a name (e.g., "MoonBackup")
-4. Select the `repo` scope
-5. Click "Generate token" and copy the token
-
 ### SCP Backup Settings
 
 ```ini
@@ -133,6 +118,65 @@ SCP_USER=""              # Remote server username
 SCP_PATH="/backups/voron" # Remote directory path
 SCP_PORT=22               # SSH port
 SCP_KEY=""               # Private key file path (optional)
+```
+
+### Nextcloud Backup Settings (WebDAV)
+
+Nextcloud is a great choice for backups as it supports large files and has no artificial size limits (depends on server configuration).
+
+```ini
+# Enable Nextcloud backup
+DEST_NEXTCLOUD=1
+
+# Nextcloud WebDAV URL (must end with /remote.php/dav/files/USERNAME/)
+# Replace USERNAME with your Nextcloud username
+NEXTCLOUD_URL="https://your-nextcloud-server.com/remote.php/dav/files/USERNAME/"
+
+# Nextcloud credentials
+NEXTCLOUD_USER="your_username"
+NEXTCLOUD_PASSWORD="your_password_or_app_password"
+
+# Remote path on Nextcloud (relative to user root, NO leading/trailing slash!)
+# Example: "Backups/VORON" will create the file at: NEXTCLOUD_URL/Backups/VORON/backup.tar.gz
+NEXTCLOUD_PATH="Backups/VORON"
+
+# Chunked upload settings (for large files > server limits)
+# Set to 0 to use single upload (recommended for files < 2GB)
+NEXTCLOUD_CHUNK_SIZE=0         # Chunk size in KB (0 = disabled)
+
+# Delay between chunks to prevent server timeouts
+NEXTCLOUD_UPLOAD_DELAY=1      # Seconds between chunk uploads
+
+# Retry settings for failed uploads
+NEXTCLOUD_MAX_RETRIES=3        # Maximum retry attempts (0 = disable retries)
+NEXTCLOUD_RETRY_BACKOFF=2      # Exponential backoff multiplier
+```
+
+**Nextcloud Server Requirements:**
+
+For backups > 100MB, ensure your Nextcloud server has proper PHP configuration:
+
+```ini
+# In php.ini (or Nextcloud config.php)
+upload_max_filesize = 2G
+post_max_size = 2049M
+max_execution_time = 3600
+max_input_time = 3600
+memory_limit = 512M
+```
+
+**Security Note:** Use an **App Password** instead of your main password:
+1. Go to Nextcloud Settings → Security → App Passwords
+2. Create a new app password (e.g., "MoonBackup")
+3. Use this password in `NEXTCLOUD_PASSWORD`
+
+**Testing WebDAV Access:**
+```bash
+# Test if WebDAV is accessible
+curl -u USERNAME:PASSWORD -X PROPFIND "https://your-nextcloud-server.com/remote.php/dav/files/USERNAME/"
+
+# Test file upload
+curl -u USERNAME:PASSWORD -T testfile.txt -X PUT "https://your-nextcloud-server.com/remote.php/dav/files/USERNAME/test.txt"
 ```
 
 ### Email Notification Settings
