@@ -451,82 +451,93 @@ backup_nextcloud() {
     
     # Check chunk size setting
     if [ "$NEXTCLOUD_CHUNK_SIZE" -gt 0 ] 2>/dev/null; then
-        # TUS protocol for chunked uploads
         local chunk_size_kb="$NEXTCLOUD_CHUNK_SIZE"
         local chunk_size_bytes=$((chunk_size_kb * 1024))
         
         if [ "$file_size" -gt "$chunk_size_bytes" ]; then
-            log "INFO" "Uploading large file via TUS protocol (chunk size: ${chunk_size_kb}KB)..."
+            # Try TUS protocol first, fallback to single upload if TUS is not supported
+            log "INFO" "Attempting TUS protocol upload (chunk size: ${chunk_size_kb}KB)..."
             
             # Generate unique upload ID
             local upload_id="moonbackup_$(date +%s%N)"
-            local uploads_url="${webdav_url}/uploads/${upload_id}"
             
-            # Step 1: Create upload directory
+            # TUS uploads go to /remote.php/dav/uploads/ (not under /files/USERNAME/)
+            # Extract base URL by removing /files/USERNAME/ part
+            local base_url="${webdav_url%/files/*}"
+            local uploads_url="${base_url}/uploads/${upload_id}"
+            
+            # Step 1: Create upload directory (try TUS)
             log "DEBUG" "Creating TUS upload directory: ${uploads_url}/"
+            local tus_supported=1
             if ! curl -sS -f -X MKCOL -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
                 "${uploads_url}/" 2>> "$LOG_FILE"; then
-                log "ERROR" "Failed to create TUS upload directory"
-                return 1
+                log "WARN" "TUS protocol not supported (MKCOL failed), falling back to single upload"
+                tus_supported=0
             fi
             
-            # Step 2: Upload chunks
-            local offset=0
-            local all_chunks_ok=1
-            
-            while [ "$offset" -lt "$file_size" ]; do
-                local remaining=$((file_size - offset))
-                local current_chunk_size=$((chunk_size_bytes < remaining ? chunk_size_bytes : remaining))
+            if [ "$tus_supported" -eq 1 ]; then
+                # Step 2: Upload chunks using TUS
+                local offset=0
+                local all_chunks_ok=1
                 
-                # Extract chunk using dd
-                local chunk_file="${backup_file}.chunk_${offset}"
-                if ! dd if="$backup_file" of="$chunk_file" bs="$current_chunk_size" count=1 skip="$offset" 2>/dev/null; then
-                    log "ERROR" "Failed to extract chunk at offset $offset"
+                while [ "$offset" -lt "$file_size" ]; do
+                    local remaining=$((file_size - offset))
+                    local current_chunk_size=$((chunk_size_bytes < remaining ? chunk_size_bytes : remaining))
+                    
+                    # Extract chunk using dd
+                    local chunk_file="${backup_file}.chunk_${offset}"
+                    if ! dd if="$backup_file" of="$chunk_file" bs="$current_chunk_size" count=1 skip="$offset" 2>/dev/null; then
+                        log "ERROR" "Failed to extract chunk at offset $offset"
+                        rm -f "$chunk_file"
+                        all_chunks_ok=0
+                        break
+                    fi
+                    
+                    # Format offset as 16-digit hexadecimal with leading zeros
+                    local offset_hex=$(printf "%016x" "$offset")
+                    
+                    # Upload chunk with retry
+                    if ! nextcloud_upload_chunk_tus "$chunk_file" "$uploads_url" "$offset_hex" \
+                        "$NEXTCLOUD_MAX_RETRIES" "$NEXTCLOUD_UPLOAD_DELAY" "$NEXTCLOUD_RETRY_BACKOFF"; then
+                        log "ERROR" "Failed to upload chunk at offset $offset"
+                        rm -f "$chunk_file"
+                        all_chunks_ok=0
+                        break
+                    fi
+                    
                     rm -f "$chunk_file"
-                    all_chunks_ok=0
-                    break
+                    offset=$((offset + current_chunk_size))
+                done
+                
+                # Cleanup temporary chunks
+                rm -f "${backup_file}.chunk_"*
+                
+                if [ "$all_chunks_ok" -eq 0 ]; then
+                    log "ERROR" "Nextcloud TUS chunked upload failed"
+                    # Cleanup upload directory
+                    curl -sS -f -X DELETE -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+                        "${uploads_url}/" >/dev/null 2>&1
+                    return 1
                 fi
                 
-                # Format offset as 16-digit hexadecimal with leading zeros
-                local offset_hex=$(printf "%016x" "$offset")
-                
-                # Upload chunk with retry
-                if ! nextcloud_upload_chunk_tus "$chunk_file" "$uploads_url" "$offset_hex" \
-                    "$NEXTCLOUD_MAX_RETRIES" "$NEXTCLOUD_UPLOAD_DELAY" "$NEXTCLOUD_RETRY_BACKOFF"; then
-                    log "ERROR" "Failed to upload chunk at offset $offset"
-                    rm -f "$chunk_file"
-                    all_chunks_ok=0
-                    break
+                # Step 3: Finalize upload with MOVE
+                log "DEBUG" "Finalizing TUS upload with MOVE to: $final_dest"
+                if ! curl -sS -f -X MOVE -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+                    -H "Destination: ${final_dest}" -H "Overwrite: T" \
+                    "${uploads_url}/" 2>> "$LOG_FILE"; then
+                    log "ERROR" "Failed to finalize TUS upload (MOVE operation)"
+                    # Cleanup upload directory
+                    curl -sS -f -X DELETE -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+                        "${uploads_url}/" >/dev/null 2>&1
+                    return 1
                 fi
                 
-                rm -f "$chunk_file"
-                offset=$((offset + current_chunk_size))
-            done
-            
-            # Cleanup temporary chunks
-            rm -f "${backup_file}.chunk_"*
-            
-            if [ "$all_chunks_ok" -eq 0 ]; then
-                log "ERROR" "Nextcloud TUS chunked upload failed"
-                # Cleanup upload directory
-                curl -sS -f -X DELETE -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
-                    "${uploads_url}/" >/dev/null 2>&1
-                return 1
+                log "INFO" "TUS upload completed and finalized"
+            else
+                # Fallback: Single upload (TUS not supported)
+                log "INFO" "Falling back to single upload (TUS not available)"
+                upload_single_nextcloud "$backup_file" "$final_dest"
             fi
-            
-            # Step 3: Finalize upload with MOVE
-            log "DEBUG" "Finalizing TUS upload with MOVE to: $final_dest"
-            if ! curl -sS -f -X MOVE -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
-                -H "Destination: ${final_dest}" -H "Overwrite: T" \
-                "${uploads_url}/" 2>> "$LOG_FILE"; then
-                log "ERROR" "Failed to finalize TUS upload (MOVE operation)"
-                # Cleanup upload directory
-                curl -sS -f -X DELETE -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
-                    "${uploads_url}/" >/dev/null 2>&1
-                return 1
-            fi
-            
-            log "INFO" "TUS upload completed and finalized"
         else
             # File is small enough for single upload
             upload_single_nextcloud "$backup_file" "$final_dest"
