@@ -379,16 +379,21 @@ backup_scp() {
     
     log "INFO" "Starting SCP backup to ${SCP_USER}@${SCP_HOST}:${SCP_PATH}..."
     
-    local backup_file="$LOCAL_BACKUP_DIR/$(get_backup_filename)"
     local start_time
     start_time=$(date +%s)
     
-    # First create local backup if it doesn't exist
-    if [ ! -f "$backup_file" ]; then
+    # Find the latest local backup file
+    local backup_file
+    backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
+    
+    # If no backup found, create one
+    if [ -z "$backup_file" ] || [ ! -f "$backup_file" ]; then
         if ! backup_local; then
             log "ERROR" "Failed to create local backup for SCP transfer"
             return 1
         fi
+        # Find the backup we just created
+        backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
     fi
     
     # Build SCP command
