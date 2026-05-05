@@ -120,6 +120,7 @@ parse_config() {
     : ${DEST_LOCAL:=1}
     : ${DEST_GITHUB:=0}
     : ${DEST_SCP:=0}
+    : ${DEST_NEXTCLOUD:=0}
     : ${LOCAL_BACKUP_DIR:="$HOME/Backup"}
     : ${LOCAL_MAX_BACKUPS:=5}
     : ${LOCAL_COMPRESSION:=6}
@@ -420,6 +421,169 @@ backup_scp() {
     fi
 }
 
+# Backup to Nextcloud via WebDAV
+backup_nextcloud() {
+    if [ "$DEST_NEXTCLOUD" != "1" ]; then
+        log "INFO" "Nextcloud backup is disabled"
+        return 0
+    fi
+    
+    if [ -z "$NEXTCLOUD_URL" ] || [ -z "$NEXTCLOUD_USER" ] || [ -z "$NEXTCLOUD_PASSWORD" ]; then
+        log "ERROR" "Nextcloud backup enabled but URL, username, or password not configured"
+        return 1
+    fi
+    
+    # Check for curl
+    if ! command_exists curl; then
+        log "ERROR" "Nextcloud backup requires 'curl' - please install it first"
+        return 1
+    fi
+    
+    log "INFO" "Starting Nextcloud backup to ${NEXTCLOUD_USER}@${NEXTCLOUD_URL}${NEXTCLOUD_PATH}..."
+    
+    local start_time
+    start_time=$(date +%s)
+    
+    # Ensure the target directory exists on Nextcloud
+    local webdav_url="${NEXTCLOUD_URL%/}"
+    local upload_path="${NEXTCLOUD_PATH#/}"
+    
+    # Create the full path for directory creation
+    local dir_url="${webdav_url}/${upload_path}"
+    
+    # Create directory if it doesn't exist
+    local create_dir_cmd
+    create_dir_cmd=$(printf 'curl -sS -f -X MKCOL -u "%s:%s" "%s"' \
+        "$NEXTCLOUD_USER" "$NEXTCLOUD_PASSWORD" "$dir_url")
+    
+    log "DEBUG" "Checking/creating directory: $create_dir_cmd"
+    
+    # Try to create the directory (MKCOL is idempotent - safe to call multiple times)
+    if ! eval "$create_dir_cmd" 2>> "$LOG_FILE"; then
+        # Directory might already exist, which is fine
+        log "DEBUG" "Directory may already exist, continuing..."
+    fi
+    
+    # Find the latest local backup file
+    local backup_file
+    backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
+    
+    # If no backup found, create one
+    if [ -z "$backup_file" ] || [ ! -f "$backup_file" ]; then
+        if ! backup_local; then
+            log "ERROR" "Failed to create local backup for Nextcloud transfer"
+            return 1
+        fi
+        # Find the backup we just created
+        backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
+    fi
+    
+    local filename
+    filename=$(basename "$backup_file")
+    
+    # Full destination URL
+    local dest_url="${webdav_url}/${upload_path}/${filename}"
+    
+    log "DEBUG" "WebDAV destination URL: $dest_url"
+    
+    # Check chunk size setting
+    if [ "$NEXTCLOUD_CHUNK_SIZE" -gt 0 ] 2>/dev/null; then
+        # Chunked upload for large files
+        local chunk_size_kb="$NEXTCLOUD_CHUNK_SIZE"
+        local chunk_size_bytes=$((chunk_size_kb * 1024))
+        local file_size
+        file_size=$(stat -c%s "$backup_file" 2>/dev/null || echo 0)
+        
+        if [ "$file_size" -gt "$chunk_size_bytes" ]; then
+            log "INFO" "Uploading large file in chunks (chunk size: ${chunk_size_kb}KB)..."
+            
+            # Create temporary directory for chunks
+            local chunk_dir
+            chunk_dir=$(mktemp -d)
+            
+            # Split file into chunks
+            split -b "${chunk_size_bytes}" "$backup_file" "${chunk_dir}/chunk_" 2>> "$LOG_FILE"
+            local split_exit=$?
+            
+            if [ "$split_exit" -ne 0 ]; then
+                log "ERROR" "Failed to split file into chunks"
+                rm -rf "$chunk_dir"
+                return 1
+            fi
+            
+            # Upload each chunk
+            local chunk_num=1
+            local all_chunks_ok=1
+            
+            for chunk_file in "${chunk_dir}"/chunk_*; do
+                local chunk_dest="${dest_url}.part${chunk_num}"
+                local upload_cmd
+                upload_cmd=$(printf 'curl -sS -f -T "%s" -u "%s:%s" -X PUT "%s"' \
+                    "$chunk_file" "$NEXTCLOUD_USER" "$NEXTCLOUD_PASSWORD" "$chunk_dest")
+                
+                log "DEBUG" "Uploading chunk $chunk_num..."
+                
+                if eval "$upload_cmd" 2>> "$LOG_FILE"; then
+                    log "DEBUG" "Chunk $chunk_num uploaded successfully"
+                else
+                    log "ERROR" "Failed to upload chunk $chunk_num"
+                    all_chunks_ok=0
+                    break
+                fi
+                
+                chunk_num=$((chunk_num + 1))
+            done
+            
+            # Cleanup chunks
+            rm -rf "$chunk_dir"
+            
+            if [ "$all_chunks_ok" -eq 0 ]; then
+                log "ERROR" "Nextcloud chunked upload failed"
+                return 1
+            fi
+            
+            # Notify that chunks are uploaded (no assembly needed - Nextcloud handles it)
+            log "INFO" "All chunks uploaded - Nextcloud will assemble the file"
+        else
+            # Single upload (file is small enough)
+            upload_single_nextcloud "$backup_file" "$dest_url"
+        fi
+    else
+        # Single upload (no chunking)
+        upload_single_nextcloud "$backup_file" "$dest_url"
+    fi
+    
+    if [ $? -eq 0 ]; then
+        local end_time
+        end_time=$(date +%s)
+        local duration=$((end_time - start_time))
+        
+        log "SUCCESS" "Nextcloud backup completed (Duration: ${duration}s)"
+        return 0
+    else
+        log "ERROR" "Nextcloud backup failed"
+        return 1
+    fi
+}
+
+# Helper function for single file upload to Nextcloud
+upload_single_nextcloud() {
+    local file="$1"
+    local dest="$2"
+    
+    local upload_cmd
+    upload_cmd=$(printf 'curl -sS -f -T "%s" -u "%s:%s" -X PUT "%s"' \
+        "$file" "$NEXTCLOUD_USER" "$NEXTCLOUD_PASSWORD" "$dest")
+    
+    log "DEBUG" "Executing: $upload_cmd"
+    
+    if eval "$upload_cmd" 2>> "$LOG_FILE"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Send email notification
 send_email() {
     if [ "$EMAIL_ENABLED" != "1" ]; then
@@ -455,6 +619,7 @@ send_email() {
     [ "$DEST_LOCAL" = "1" ] && body+="  - Local: $LOCAL_BACKUP_DIR\n"
     [ "$DEST_GITHUB" = "1" ] && body+="  - GitHub: $GITHUB_REPO\n"
     [ "$DEST_SCP" = "1" ] && body+="  - SCP: ${SCP_USER}@${SCP_HOST}:${SCP_PATH}\n"
+    [ "$DEST_NEXTCLOUD" = "1" ] && body+="  - Nextcloud: ${NEXTCLOUD_URL}${NEXTCLOUD_PATH}\n"
     
     body+="\nBackup Configuration:\n"
     body+="  Type: $BACKUP_TYPE\n"
@@ -589,6 +754,7 @@ echo ""
 local_success=1
 github_success=1
 scp_success=1
+nextcloud_success=1
 
 # Local backup
 if [ "$DEST_LOCAL" = "1" ]; then
@@ -613,12 +779,22 @@ if [ "$DEST_SCP" = "1" ]; then
     scp_success=$?
 fi
 
+# Nextcloud backup
+nextcloud_success=0
+if [ "$DEST_NEXTCLOUD" = "1" ]; then
+    echo -e "${CYAN}Creating Nextcloud backup...${NC}"
+    backup_nextcloud
+    nextcloud_success=$?
+fi
+
 # Determine overall status
 if [ "$DEST_LOCAL" = "1" ] && [ "$local_success" -ne 0 ]; then
     BACKUP_STATUS="FAILED"
 elif [ "$DEST_GITHUB" = "1" ] && [ "$github_success" -ne 0 ]; then
     BACKUP_STATUS="FAILED"
 elif [ "$DEST_SCP" = "1" ] && [ "$scp_success" -ne 0 ]; then
+    BACKUP_STATUS="FAILED"
+elif [ "$DEST_NEXTCLOUD" = "1" ] && [ "$nextcloud_success" -ne 0 ]; then
     BACKUP_STATUS="FAILED"
 else
     BACKUP_STATUS="SUCCESS"
@@ -663,6 +839,13 @@ echo "Results:"
         echo -e "  ${GREEN}✓ SCP backup: SUCCESS${NC}"
     else
         echo -e "  ${RED}✗ SCP backup: FAILED${NC}"
+    fi
+}
+[ "$DEST_NEXTCLOUD" = "1" ] && {
+    if [ "$nextcloud_success" -eq 0 ]; then
+        echo -e "  ${GREEN}✓ Nextcloud backup: SUCCESS${NC}"
+    else
+        echo -e "  ${RED}✗ Nextcloud backup: FAILED${NC}"
     fi
 }
 
