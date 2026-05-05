@@ -121,6 +121,7 @@ parse_config() {
     : ${DEST_GITHUB:=0}
     : ${DEST_SCP:=0}
     : ${DEST_NEXTCLOUD:=0}
+    : ${NEXTCLOUD_UPLOAD_DELAY:=1}
     : ${LOCAL_BACKUP_DIR:="$HOME/Backup"}
     : ${LOCAL_MAX_BACKUPS:=5}
     : ${LOCAL_COMPRESSION:=6}
@@ -529,6 +530,12 @@ backup_nextcloud() {
                     log "ERROR" "Failed to upload chunk $chunk_num"
                     all_chunks_ok=0
                     break
+                fi
+                
+                # Add delay between chunks to prevent server timeouts
+                if [ "$NEXTCLOUD_UPLOAD_DELAY" -gt 0 ] 2>/dev/null; then
+                    log "DEBUG" "Waiting ${NEXTCLOUD_UPLOAD_DELAY}s before next chunk..."
+                    sleep "$NEXTCLOUD_UPLOAD_DELAY"
                 fi
                 
                 chunk_num=$((chunk_num + 1))
