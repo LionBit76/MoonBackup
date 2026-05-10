@@ -192,8 +192,18 @@ create_exclude_list() {
     printf "%s " "${excludes[@]}"
 }
 
+# Rotate backups before creating new one (enforce max count)
+enforce_backup_rotation() {
+    if [ "$LOCAL_MAX_BACKUPS" -gt 0 ] 2>/dev/null; then
+        rotate_backups "$LOCAL_BACKUP_DIR" "$LOCAL_MAX_BACKUPS"
+    fi
+}
+
 # Backup to local
 backup_local() {
+    # Enforce rotation before creating new backup
+    enforce_backup_rotation
+    
     local backup_file="$LOCAL_BACKUP_DIR/$(get_backup_filename)"
     local start_time
     start_time=$(date +%s)
