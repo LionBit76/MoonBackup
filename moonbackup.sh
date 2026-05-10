@@ -120,6 +120,7 @@ parse_config() {
     : ${DEST_LOCAL:=1}
     : ${DEST_SCP:=0}
     : ${DEST_NEXTCLOUD:=0}
+    : ${DEST_SMB:=0}
     : ${NEXTCLOUD_UPLOAD_DELAY:=1}
     : ${NEXTCLOUD_MAX_RETRIES:=3}
     : ${NEXTCLOUD_RETRY_BACKOFF:=2}
@@ -562,6 +563,93 @@ backup_nextcloud() {
     fi
 }
 
+# Backup to SMB/CIFS (Windows share)
+backup_smb() {
+    if [ "$DEST_SMB" != "1" ]; then
+        log "INFO" "SMB backup is disabled"
+        return 0
+    fi
+    
+    if [ -z "$SMB_SERVER" ] || [ -z "$SMB_SHARE" ] || [ -z "$SMB_USER" ] || [ -z "$SMB_PASSWORD" ]; then
+        log "ERROR" "SMB backup enabled but server, share, username, or password not configured"
+        return 1
+    fi
+    
+    # Check for smbclient
+    if ! command_exists smbclient; then
+        log "ERROR" "SMB backup requires 'smbclient' - please install it first (sudo apt install smbclient)"
+        return 1
+    fi
+    
+    log "INFO" "Starting SMB backup to //${SMB_SERVER}/${SMB_SHARE}/${SMB_PATH}..."
+    
+    local start_time
+    start_time=$(date +%s)
+    
+    # Find the latest local backup file
+    local backup_file
+    backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
+    
+    # If no backup found, create one
+    if [ -z "$backup_file" ] || [ ! -f "$backup_file" ]; then
+        if ! backup_local; then
+            log "ERROR" "Failed to create local backup for SMB transfer"
+            return 1
+        fi
+        # Find the backup we just created
+        backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
+    fi
+    
+    local filename
+    filename=$(basename "$backup_file")
+    
+    # SMB destination path (combine share and path)
+    local smb_dest_path="${SMB_PATH:+${SMB_PATH}/}${filename}"
+    
+    # Build smbclient command
+    local smb_cmd="smbclient"
+    smb_cmd+=" -p ${SMB_PORT}"
+    smb_cmd+=" //${SMB_SERVER}/${SMB_SHARE}"
+    
+    if [ -n "$SMB_DOMAIN" ]; then
+        smb_cmd+=" -U ${SMB_DOMAIN}/${SMB_USER}"
+    else
+        smb_cmd+=" -U ${SMB_USER}"
+    fi
+    
+    smb_cmd+=" -c 'cd ${SMB_PATH} 2>/dev/null; put \"${backup_file}\" \"${filename}\"'"
+    
+    # Export password for smbclient (it reads from SMB_PASSWORD env var or prompts)
+    export SMB_PASSWORD
+    
+    log "DEBUG" "Executing: smbclient command to //${SMB_SERVER}/${SMB_SHARE}/"
+    
+    # Execute smbclient with password via stdin
+    local smb_result
+    smb_result=$(echo -e "${SMB_PASSWORD}\n${SMB_PASSWORD}" | \
+        smbclient -p "$SMB_PORT" "//${SMB_SERVER}/${SMB_SHARE}" \
+        -U "${SMB_DOMAIN:+${SMB_DOMAIN}/}${SMB_USER}" \
+        -c "cd ${SMB_PATH} 2>/dev/null; put \"${backup_file}\" \"${filename}\"" 2>> "$LOG_FILE")
+    
+    local smb_exit=$?
+    
+    # Clear exported password
+    unset SMB_PASSWORD
+    
+    if [ "$smb_exit" -eq 0 ]; then
+        local end_time
+        end_time=$(date +%s)
+        local duration=$((end_time - start_time))
+        
+        log "SUCCESS" "SMB backup completed (Duration: ${duration}s)"
+        return 0
+    else
+        log "ERROR" "SMB backup failed (exit code: $smb_exit)"
+        log "DEBUG" "SMB result: $smb_result"
+        return 1
+    fi
+}
+
 # Send email notification
 send_email() {
     if [ "$EMAIL_ENABLED" != "1" ]; then
@@ -597,6 +685,7 @@ send_email() {
     [ "$DEST_LOCAL" = "1" ] && body+="  - Local: $LOCAL_BACKUP_DIR\n"
     [ "$DEST_SCP" = "1" ] && body+="  - SCP: ${SCP_USER}@${SCP_HOST}:${SCP_PATH}\n"
     [ "$DEST_NEXTCLOUD" = "1" ] && body+="  - Nextcloud: ${NEXTCLOUD_URL}${NEXTCLOUD_PATH}\n"
+    [ "$DEST_SMB" = "1" ] && body+="  - SMB: //${SMB_SERVER}/${SMB_SHARE}/${SMB_PATH}\n"
     
     body+="\nBackup Configuration:\n"
     body+="  Type: $BACKUP_TYPE\n"
@@ -731,6 +820,7 @@ echo ""
 local_success=1
 scp_success=1
 nextcloud_success=1
+smb_success=1
 
 # Local backup
 if [ "$DEST_LOCAL" = "1" ]; then
@@ -755,12 +845,30 @@ if [ "$DEST_NEXTCLOUD" = "1" ]; then
     nextcloud_success=$?
 fi
 
+# SMB backup
+smb_success=0
+if [ "$DEST_SMB" = "1" ]; then
+    echo -e "${CYAN}Creating SMB backup...${NC}"
+    backup_smb
+    smb_success=$?
+fi
+
+# Nextcloud backup
+nextcloud_success=0
+if [ "$DEST_NEXTCLOUD" = "1" ]; then
+    echo -e "${CYAN}Creating Nextcloud backup...${NC}"
+    backup_nextcloud
+    nextcloud_success=$?
+fi
+
 # Determine overall status
 if [ "$DEST_LOCAL" = "1" ] && [ "$local_success" -ne 0 ]; then
     BACKUP_STATUS="FAILED"
 elif [ "$DEST_SCP" = "1" ] && [ "$scp_success" -ne 0 ]; then
     BACKUP_STATUS="FAILED"
 elif [ "$DEST_NEXTCLOUD" = "1" ] && [ "$nextcloud_success" -ne 0 ]; then
+    BACKUP_STATUS="FAILED"
+elif [ "$DEST_SMB" = "1" ] && [ "$smb_success" -ne 0 ]; then
     BACKUP_STATUS="FAILED"
 else
     BACKUP_STATUS="SUCCESS"
@@ -805,6 +913,13 @@ echo "Results:"
         echo -e "  ${GREEN}✓ Nextcloud backup: SUCCESS${NC}"
     else
         echo -e "  ${RED}✗ Nextcloud backup: FAILED${NC}"
+    fi
+}
+[ "$DEST_SMB" = "1" ] && {
+    if [ "$smb_success" -eq 0 ]; then
+        echo -e "  ${GREEN}✓ SMB backup: SUCCESS${NC}"
+    else
+        echo -e "  ${RED}✗ SMB backup: FAILED${NC}"
     fi
 }
 

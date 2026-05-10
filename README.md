@@ -1,4 +1,4 @@
-# MoonBackup (under construction)
+# MoonBackup
 
 ![MoonBackup](images/moonbackup.png)
 
@@ -8,7 +8,7 @@ A comprehensive backup and restore solution for VORON 3D printers running Mainsa
 
 - **Full System Backup**: Backup your entire home directory or select specific directories
 - **Multiple Backup Types**: Full or incremental backups
-- **Multiple Destinations**: Local storage, SCP, **Nextcloud (WebDAV)** to remote server
+- **Multiple Destinations**: Local storage, SCP, **Nextcloud (WebDAV)**, **SMB/CIFS (Windows shares)** to remote server
 - **Selective Backup**: Choose what to include/exclude (timelapse, gcodes, logs, etc.)
 - **Moonraker Integration**: Stops Moonraker before database backup and restarts it afterward
 - **Email Notifications**: Get notified about backup status with config file attachment
@@ -21,9 +21,9 @@ A comprehensive backup and restore solution for VORON 3D printers running Mainsa
 
 - MainsailOS or any Debian-based system running Moonraker
 - G-Code Shell Command must be installed (required for RUN_SHELL_COMMAND)
-- git (for GitHub backups)
 - tar, gzip (for compression)
 - curl (for Nextcloud WebDAV uploads)
+- smbclient (for SMB/Windows share uploads - install with `sudo apt install smbclient`)
 - Optional: sendmail, mail, or swaks (for email notifications)
 
 ### Install G-Code Shell Command (if not installed)
@@ -100,6 +100,7 @@ Enable/disable backup destinations:
 DEST_LOCAL=1              # Local backup to ~/Backup
 DEST_SCP=0               # Backup via SCP
 DEST_NEXTCLOUD=0         # Backup to Nextcloud via WebDAV
+DEST_SMB=0               # Backup to SMB/Windows share
 ```
 
 ### Local Backup Settings
@@ -152,19 +153,6 @@ NEXTCLOUD_MAX_RETRIES=3        # Maximum retry attempts (0 = disable retries)
 NEXTCLOUD_RETRY_BACKOFF=2      # Exponential backoff multiplier
 ```
 
-**Nextcloud Server Requirements:**
-
-For backups > 100MB, ensure your Nextcloud server has proper PHP configuration:
-
-```ini
-# In php.ini (or Nextcloud config.php)
-upload_max_filesize = 2G
-post_max_size = 2049M
-max_execution_time = 3600
-max_input_time = 3600
-memory_limit = 512M
-```
-
 **Security Note:** Use an **App Password** instead of your main password:
 1. Go to Nextcloud Settings → Security → App Passwords
 2. Create a new app password (e.g., "MoonBackup")
@@ -177,6 +165,51 @@ curl -u USERNAME:PASSWORD -X PROPFIND "https://your-nextcloud-server.com/remote.
 
 # Test file upload
 curl -u USERNAME:PASSWORD -T testfile.txt -X PUT "https://your-nextcloud-server.com/remote.php/dav/files/USERNAME/test.txt"
+```
+
+### SMB Backup Settings (Windows Shares)
+
+For backing up to Windows shares or Samba servers.
+
+```ini
+# Enable SMB backup
+DEST_SMB=1
+
+# SMB server hostname or IP address
+SMB_SERVER="192.168.1.100"
+
+# SMB share name
+SMB_SHARE="Backup"
+
+# SMB username
+SMB_USER="username"
+
+# SMB password
+SMB_PASSWORD="your_password"
+
+# SMB domain (optional, leave empty for workgroup)
+SMB_DOMAIN="WORKGROUP"
+
+# Remote path on the share (NO leading/trailing slash!)
+# Example: "VORON" or "Backups/VORON"
+SMB_PATH="VORON"
+
+# SMB port (default: 445)
+SMB_PORT=445
+```
+
+**Prerequisites:**
+- `smbclient` must be installed: `sudo apt install smbclient`
+- SMB port (445) must be accessible
+- Share must allow write access for the user
+
+**Testing SMB Access:**
+```bash
+# Test connection and list files
+smbclient -p 445 //SERVER/SHARE -U USERNAME -c 'ls'
+
+# Test file upload
+smbclient -p 445 //SERVER/SHARE -U USERNAME -c 'put testfile.txt'
 ```
 
 ### Email Notification Settings
