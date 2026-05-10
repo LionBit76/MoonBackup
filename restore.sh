@@ -247,18 +247,24 @@ list_backups() {
         fi
     fi
     
-    # Check for GitHub backups (if configured)
-    if [ "$DEST_GITHUB" = "1" ] && [ -n "$GITHUB_TOKEN" ] && [ -n "$GITHUB_REPO" ]; then
-        echo -e "${CYAN}GitHub Backups:${NC}"
-        echo "  Repository: $GITHUB_REPO"
-        echo "  Branch: $GITHUB_BRANCH"
-        echo ""
-    fi
-    
     # Check for SCP backups (if configured)
     if [ "$DEST_SCP" = "1" ] && [ -n "$SCP_HOST" ] && [ -n "$SCP_USER" ]; then
         echo -e "${CYAN}SCP Backups:${NC}"
         echo "  Server: ${SCP_USER}@${SCP_HOST}:${SCP_PATH}"
+        echo ""
+    fi
+    
+    # Check for Nextcloud backups (if configured)
+    if [ "$DEST_NEXTCLOUD" = "1" ] && [ -n "$NEXTCLOUD_URL" ] && [ -n "$NEXTCLOUD_USER" ]; then
+        echo -e "${CYAN}Nextcloud Backups:${NC}"
+        echo "  URL: ${NEXTCLOUD_URL}${NEXTCLOUD_PATH}"
+        echo ""
+    fi
+    
+    # Check for SMB backups (if configured)
+    if [ "$DEST_SMB" = "1" ] && [ -n "$SMB_SERVER" ] && [ -n "$SMB_SHARE" ]; then
+        echo -e "${CYAN}SMB Backups:${NC}"
+        echo "  Server: //${SMB_SERVER}/${SMB_SHARE}/${SMB_PATH}"
         echo ""
     fi
 }
@@ -327,54 +333,124 @@ restore_local() {
     return 0
 }
 
-# Restore from GitHub backup
-restore_github() {
-    if [ -z "$GITHUB_TOKEN" ] || [ -z "$GITHUB_REPO" ]; then
-        log "ERROR" "GitHub restore enabled but token or repo not configured"
+# Restore from Nextcloud backup
+restore_nextcloud() {
+    if [ -z "$NEXTCLOUD_URL" ] || [ -z "$NEXTCLOUD_USER" ] || [ -z "$NEXTCLOUD_PASSWORD" ]; then
+        log "ERROR" "Nextcloud restore enabled but URL, username, or password not configured"
         return 1
     fi
     
-    log "INFO" "Starting GitHub restore..."
+    # Check for curl
+    if ! command_exists curl; then
+        log "ERROR" "Nextcloud restore requires 'curl' - please install it first"
+        return 1
+    fi
+    
+    log "INFO" "Starting Nextcloud restore..."
     
     # Create temporary directory
     local temp_dir
     temp_dir=$(mktemp -d)
     local temp_backup="$temp_dir/backup.tar.gz"
     
-    local repo_url="https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
-    local branch="$GITHUB_BRANCH"
+    # Prepare URLs
+    local webdav_url="${NEXTCLOUD_URL%/}"
+    local upload_path="${NEXTCLOUD_PATH#/}"
     
-    # Clone repository
-    cd "$temp_dir" || return 1
-    
-    if ! git clone -q --branch "$branch" "$repo_url" repo 2>> "$LOG_FILE"; then
-        log "ERROR" "Failed to clone GitHub repository"
-        cd - > /dev/null || return 1
-        rm -rf "$temp_dir"
-        return 1
-    fi
-    
-    cd repo || return 1
-    
-    # Find latest backup
+    # Find latest backup file on Nextcloud
     local latest_backup
-    latest_backup=$(find . -name "backup.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
+    latest_backup=$(curl -sS -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+        "${webdav_url}/${upload_path}/" 2>> "$LOG_FILE" | \
+        grep "${BACKUP_PREFIX}_.*\.tar\.gz" | \
+        sort -r | head -n 1 | \
+        sed "s|.*<d:href>|" | sed "s|</d:href>.*||")
     
-    if [ -z "$latest_backup" ] || [ ! -f "$latest_backup" ]; then
-        log "ERROR" "No backup file found in GitHub repository"
-        cd - > /dev/null || return 1
+    # Remove XML namespace if present
+    latest_backup=$(echo "$latest_backup" | sed 's|>|>|g' | grep -o "${BACKUP_PREFIX}_[0-9]\{8\}-[0-9]\{6\}\.tar\.gz")
+    
+    if [ -z "$latest_backup" ]; then
+        # Try PROPFIND to list files
+        latest_backup=$(curl -sS -f -X PROPFIND -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+            "${webdav_url}/${upload_path}/" 2>> "$LOG_FILE" | \
+            grep -o "${BACKUP_PREFIX}_[0-9]\{8\}-[0-9]\{6\}\.tar\.gz" | \
+            sort -r | head -n 1)
+    fi
+    
+    if [ -z "$latest_backup" ]; then
+        log "ERROR" "No backup file found in Nextcloud"
         rm -rf "$temp_dir"
         return 1
     fi
     
-    log "INFO" "Found backup: $latest_backup"
+    local backup_url="${webdav_url}/${upload_path}/${latest_backup}"
+    log "INFO" "Found Nextcloud backup: $latest_backup"
     
-    # Copy backup to temp location
-    cp "$latest_backup" "$temp_backup"
+    # Download backup
+    if ! curl -sS -f -o "$temp_backup" -u "${NEXTCLOUD_USER}:${NEXTCLOUD_PASSWORD}" \
+        "$backup_url" 2>> "$LOG_FILE"; then
+        log "ERROR" "Failed to download backup from Nextcloud"
+        rm -rf "$temp_dir"
+        return 1
+    fi
     
-    cd - > /dev/null || return 1
-    rm -rf repo
-    cd - > /dev/null || return 1
+    # Extract and restore
+    if ! restore_local "$temp_backup"; then
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    # Cleanup
+    rm -rf "$temp_dir"
+    
+    return 0
+}
+
+# Restore from SMB backup
+restore_smb() {
+    if [ -z "$SMB_SERVER" ] || [ -z "$SMB_SHARE" ] || [ -z "$SMB_USER" ] || [ -z "$SMB_PASSWORD" ]; then
+        log "ERROR" "SMB restore enabled but server, share, username, or password not configured"
+        return 1
+    fi
+    
+    # Check for smbclient
+    if ! command_exists smbclient; then
+        log "ERROR" "SMB restore requires 'smbclient' - please install it first (sudo apt install smbclient)"
+        return 1
+    fi
+    
+    log "INFO" "Starting SMB restore from //${SMB_SERVER}/${SMB_SHARE}/${SMB_PATH}..."
+    
+    # Create temporary directory
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    local temp_backup="$temp_dir/backup.tar.gz"
+    
+    # Find latest backup file on SMB share
+    local latest_backup
+    latest_backup=$(echo -e "${SMB_PASSWORD}\n${SMB_PASSWORD}" | \
+        smbclient -p "$SMB_PORT" "//${SMB_SERVER}/${SMB_SHARE}" \
+        -U "${SMB_DOMAIN:+${SMB_DOMAIN}/}${SMB_USER}" \
+        -c "cd ${SMB_PATH} 2>/dev/null; ls ${BACKUP_PREFIX}_*.tar.gz" 2>> "$LOG_FILE" | \
+        grep "${BACKUP_PREFIX}_.*\.tar\.gz" | sort -r | head -n 1 | \
+        awk '{print $NF}')
+    
+    if [ -z "$latest_backup" ]; then
+        log "ERROR" "No backup file found in SMB share"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    log "INFO" "Found SMB backup: $latest_backup"
+    
+    # Download backup
+    if ! echo -e "${SMB_PASSWORD}\n${SMB_PASSWORD}" | \
+        smbclient -p "$SMB_PORT" "//${SMB_SERVER}/${SMB_SHARE}" \
+        -U "${SMB_DOMAIN:+${SMB_DOMAIN}/}${SMB_USER}" \
+        -c "cd ${SMB_PATH} 2>/dev/null; get ${latest_backup} ${temp_backup}" 2>> "$LOG_FILE"; then
+        log "ERROR" "Failed to download backup from SMB share"
+        rm -rf "$temp_dir"
+        return 1
+    fi
     
     # Extract and restore
     if ! restore_local "$temp_backup"; then
@@ -592,10 +668,15 @@ case "$ACTION" in
         echo -e "${CYAN}Restoring from local backup: $BACKUP_FILE${NC}"
         restore_local "$BACKUP_FILE"
         ;;
-    github)
-        RESTORE_SOURCE="GitHub: $GITHUB_REPO"
-        echo -e "${CYAN}Restoring from GitHub backup...${NC}"
-        restore_github
+    nextcloud)
+        RESTORE_SOURCE="Nextcloud: ${NEXTCLOUD_URL}${NEXTCLOUD_PATH}"
+        echo -e "${CYAN}Restoring from Nextcloud backup...${NC}"
+        restore_nextcloud
+        ;;
+    smb)
+        RESTORE_SOURCE="SMB: //${SMB_SERVER}/${SMB_SHARE}/${SMB_PATH}"
+        echo -e "${CYAN}Restoring from SMB backup...${NC}"
+        restore_smb
         ;;
     scp)
         RESTORE_SOURCE="SCP: ${SCP_USER}@${SCP_HOST}:${SCP_PATH}"
@@ -613,7 +694,8 @@ case "$ACTION" in
             echo "  restore.sh          - Restore from latest local backup"
             echo "  restore.sh list     - List available backups"
             echo "  restore.sh local <file>  - Restore from specific local backup file"
-            echo "  restore.sh github   - Restore from GitHub backup"
+            echo "  restore.sh nextcloud - Restore from Nextcloud backup"
+            echo "  restore.sh smb      - Restore from SMB backup"
             echo "  restore.sh scp      - Restore from SCP backup"
             exit 1
         fi
