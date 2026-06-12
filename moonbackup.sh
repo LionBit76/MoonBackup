@@ -1,5 +1,6 @@
 #!/bin/bash
 # MoonBackup - Main Backup Script
+# v0.1.1
 # This script creates backups of your VORON printer configuration
 # It can backup to local storage, GitHub, or SCP to a remote server
 
@@ -117,7 +118,8 @@ parse_config() {
     : ${CUSTOM_EXCLUDE:="Backup MoonBackup"}
     : ${BACKUP_TYPE:="full"}
     : ${INCREMENTAL_FULL_KEEP:=3}
-    : ${DEST_LOCAL:=1}
+    # Local backup is always enabled - no longer configurable
+    DEST_LOCAL=1
     : ${DEST_SCP:=0}
     : ${DEST_NEXTCLOUD:=0}
     : ${DEST_SMB:=0}
@@ -321,18 +323,13 @@ backup_scp() {
     local start_time
     start_time=$(date +%s)
     
-    # Find the latest local backup file
+    # Find the latest local backup file (should exist as we always create local backup first)
     local backup_file
     backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
     
-    # If no backup found, create one
     if [ -z "$backup_file" ] || [ ! -f "$backup_file" ]; then
-        if ! backup_local; then
-            log "ERROR" "Failed to create local backup for SCP transfer"
-            return 1
-        fi
-        # Find the backup we just created
-        backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
+        log "ERROR" "No local backup file found - this should not happen as local backup is always created first"
+        return 1
     fi
     
     # Build SCP command
@@ -438,18 +435,13 @@ backup_nextcloud() {
     local webdav_url="${NEXTCLOUD_URL%/}"
     local upload_path="${NEXTCLOUD_PATH#/}"
     
-    # Find the latest local backup file
+    # Find the latest local backup file (should exist as we always create local backup first)
     local backup_file
     backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
     
-    # If no backup found, create one
     if [ -z "$backup_file" ] || [ ! -f "$backup_file" ]; then
-        if ! backup_local; then
-            log "ERROR" "Failed to create local backup for Nextcloud transfer"
-            return 1
-        fi
-        # Find the backup we just created
-        backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
+        log "ERROR" "No local backup file found - this should not happen as local backup is always created first"
+        return 1
     fi
     
     local filename
@@ -596,18 +588,13 @@ backup_smb() {
     local start_time
     start_time=$(date +%s)
     
-    # Find the latest local backup file
+    # Find the latest local backup file (should exist as we always create local backup first)
     local backup_file
     backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
     
-    # If no backup found, create one
     if [ -z "$backup_file" ] || [ ! -f "$backup_file" ]; then
-        if ! backup_local; then
-            log "ERROR" "Failed to create local backup for SMB transfer"
-            return 1
-        fi
-        # Find the backup we just created
-        backup_file=$(find "$LOCAL_BACKUP_DIR" -name "${BACKUP_PREFIX}_*.tar.gz" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n -r | head -n 1 | awk '{print $2}')
+        log "ERROR" "No local backup file found - this should not happen as local backup is always created first"
+        return 1
     fi
     
     local filename
@@ -692,7 +679,7 @@ send_email() {
     
     # Add destination info
     body+="Backup Destinations:\n"
-    [ "$DEST_LOCAL" = "1" ] && body+="  - Local: $LOCAL_BACKUP_DIR\n"
+    body+="  - Local: $LOCAL_BACKUP_DIR (always enabled)\n"
     [ "$DEST_SCP" = "1" ] && body+="  - SCP: ${SCP_USER}@${SCP_HOST}:${SCP_PATH}\n"
     [ "$DEST_NEXTCLOUD" = "1" ] && body+="  - Nextcloud: ${NEXTCLOUD_URL}${NEXTCLOUD_PATH}\n"
     [ "$DEST_SMB" = "1" ] && body+="  - SMB: //${SMB_SERVER}/${SMB_SHARE}/${SMB_PATH}\n"
@@ -832,12 +819,10 @@ scp_success=1
 nextcloud_success=1
 smb_success=1
 
-# Local backup
-if [ "$DEST_LOCAL" = "1" ]; then
-    echo -e "${CYAN}Creating local backup...${NC}"
-    backup_local
-    local_success=$?
-fi
+# Local backup - always create local backup as base for all destinations
+echo -e "${CYAN}Creating local backup...${NC}"
+backup_local
+local_success=$?
 
 # SCP backup
 scp_success=0
@@ -872,7 +857,8 @@ if [ "$DEST_NEXTCLOUD" = "1" ]; then
 fi
 
 # Determine overall status
-if [ "$DEST_LOCAL" = "1" ] && [ "$local_success" -ne 0 ]; then
+# Local backup always runs - if it failed, overall status is FAILED
+if [ "$local_success" -ne 0 ]; then
     BACKUP_STATUS="FAILED"
 elif [ "$DEST_SCP" = "1" ] && [ "$scp_success" -ne 0 ]; then
     BACKUP_STATUS="FAILED"
@@ -904,13 +890,12 @@ fi
 
 echo ""
 echo "Results:"
-[ "$DEST_LOCAL" = "1" ] && {
-    if [ "$local_success" -eq 0 ]; then
-        echo -e "  ${GREEN}✓ Local backup: SUCCESS${NC}"
-    else
-        echo -e "  ${RED}✗ Local backup: FAILED${NC}"
-    fi
-}
+# Local backup always runs
+if [ "$local_success" -eq 0 ]; then
+    echo -e "  ${GREEN}✓ Local backup: SUCCESS${NC}"
+else
+    echo -e "  ${RED}✗ Local backup: FAILED${NC}"
+fi
 [ "$DEST_SCP" = "1" ] && {
     if [ "$scp_success" -eq 0 ]; then
         echo -e "  ${GREEN}✓ SCP backup: SUCCESS${NC}"
