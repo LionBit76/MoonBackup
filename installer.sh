@@ -292,6 +292,12 @@ if [ ! -f "$SCRIPT_DIR/config/MoonBackup.cfg" ]; then
     echo -e "${GREEN}✓ Copied MoonBackup.cfg to $SCRIPT_DIR/config/${NC}"
 fi
 
+# Ensure all scripts are executable
+chmod +x "$SCRIPT_DIR/moonbackup.sh"
+chmod +x "$SCRIPT_DIR/restore.sh"
+chmod +x "$SCRIPT_DIR/db_preboot_backup.sh"
+echo -e "${GREEN}✓ Made all MoonBackup scripts executable${NC}"
+
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}       Installation Complete!             ${NC}"

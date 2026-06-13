@@ -1,6 +1,6 @@
 #!/bin/bash
 # MoonBackup - Main Backup Script
-# v0.1.1
+# v0.1.2
 # This script creates backups of your VORON printer configuration
 # It can backup to local storage, GitHub, or SCP to a remote server
 
@@ -14,6 +14,15 @@ CONFIG_FILE="$HOME/printer_data/config/MoonBackup.cfg"
 LOG_DIR="$HOME/printer_data/logs"
 LOG_FILE="$LOG_DIR/moonbackup.log"
 PID_FILE="/tmp/moonbackup.pid"
+
+# Ensure script is executable (in case it was updated via git pull)
+if [ ! -x "$0" ]; then
+    chmod +x "$0"
+    # Also make sure other scripts in the directory are executable
+    for script in "$SCRIPT_DIR"/*.sh; do
+        [ -f "$script" ] && chmod +x "$script"
+    done
+fi
 
 # Colors for output
 RED='\033[0;31m'

@@ -2,7 +2,7 @@
 
 ![MoonBackup](images/moonbackup.png)
 
-A comprehensive backup and restore solution for VORON 3D printers running MainsailOS with Moonraker.
+A comprehensive backup and restore solution for 3D printers running MainsailOS with Moonraker.
 
 ## Features
 
