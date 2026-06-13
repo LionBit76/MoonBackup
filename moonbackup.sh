@@ -161,18 +161,11 @@ get_backup_filename() {
 create_exclude_list() {
     local excludes=()
     
-    # Always exclude backup directory and MoonBackup
-    excludes+=("--exclude=./Backup")
-    excludes+=("--exclude=./MoonBackup")
-    
     # Always exclude cache and socket files (avoid permission errors)
     excludes+=("--exclude=./.cache")
     excludes+=("--exclude=*.sock")
     
     # Exclude based on configuration
-    if [ "$BACKUP_HOME" != "1" ]; then
-        excludes+=("--exclude=./")
-    fi
     if [ "$BACKUP_TIMELAPSE" != "1" ]; then
         excludes+=("--exclude=./timelapse")
     fi
@@ -182,8 +175,20 @@ create_exclude_list() {
     if [ "$BACKUP_LOGS" != "1" ]; then
         excludes+=("--exclude=./printer_data/logs")
     fi
+    if [ "$BACKUP_DATABASE" != "1" ]; then
+        excludes+=("--exclude=./printer_data/database")
+    fi
+    if [ "$BACKUP_SYSTEM" != "1" ]; then
+        excludes+=("--exclude=./printer_data/system")
+    fi
+    if [ "$BACKUP_MOONRAKER" != "1" ]; then
+        excludes+=("--exclude=./printer_data/moonraker")
+    fi
+    if [ "$BACKUP_WEBCAM" != "1" ]; then
+        excludes+=("--exclude=./webcam")
+    fi
     
-    # Custom excludes
+    # Custom excludes (from CUSTOM_EXCLUDE config)
     if [ -n "$CUSTOM_EXCLUDE" ]; then
         for dir in $CUSTOM_EXCLUDE; do
             excludes+=("--exclude=./${dir}")
@@ -220,7 +225,8 @@ backup_local() {
     excludes=$(create_exclude_list)
     
     # Build tar command
-    local tar_cmd="tar -czf \"$backup_file\" -C \"$HOME\" ${excludes}"
+    # Use --checkpoint=.1000 to log progress every 1000 records (helps detect hangs)
+    local tar_cmd="tar --checkpoint=.1000 -czf \"$backup_file\" -C \"$HOME\" ${excludes}"
     
     # Add files to include based on configuration
     if [ "$BACKUP_HOME" = "1" ]; then
@@ -234,7 +240,7 @@ backup_local() {
         [ "$BACKUP_DATABASE" = "1" ] && tar_cmd+=" ./printer_data/database"
         [ "$BACKUP_SYSTEM" = "1" ] && tar_cmd+=" ./printer_data/system"
         [ "$BACKUP_MOONRAKER" = "1" ] && tar_cmd+=" ./printer_data/moonraker"
-        [ "$BACKUP_KLIPPER" = "1" ] && tar_cmd+=" ./printer_data/klipper"
+        [ "$BACKUP_KLIPPER" = "1" ] && tar_cmd+=" ./klipper"
         [ "$BACKUP_WEBCAM" = "1" ] && tar_cmd+=" ./webcam"
     fi
     
@@ -248,7 +254,8 @@ backup_local() {
     # Execute tar command
     log "DEBUG" "Executing: $tar_cmd"
     
-    if eval "$tar_cmd" 2>> "$LOG_FILE"; then
+    # Run tar and capture both stdout and stderr to log, plus show stderr on console for debugging
+    if eval "$tar_cmd" 2> >(tee -a "$LOG_FILE" >&2) >/dev/null; then
         local end_time
         end_time=$(date +%s)
         local duration=$((end_time - start_time))
@@ -919,7 +926,6 @@ fi
 }
 
 if [ -n "$BACKUP_FILE" ]; then
-    local size
     size=$(du -h "$BACKUP_FILE" | cut -f1)
     echo ""
     echo "Backup file: $BACKUP_FILE"
