@@ -1,6 +1,6 @@
 #!/bin/bash
 # MoonBackup - Main Backup Script
-# v0.1.2
+# v0.1.4
 # This script creates backups of your VORON printer configuration
 # It can backup to local storage, GitHub, or SCP to a remote server
 
