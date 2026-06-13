@@ -1,6 +1,6 @@
 #!/bin/bash
 # MoonBackup - Main Backup Script
-# v0.1.4
+# v0.1.5
 # This script creates backups of your VORON printer configuration
 # It can backup to local storage, GitHub, or SCP to a remote server
 
@@ -10,6 +10,12 @@ set -o pipefail
 # GLOBAL VARIABLES
 # ============================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Ensure HOME is set correctly (fixes issues when called from Moonraker WebUI)
+if [ -z "$HOME" ] || [ ! -d "$HOME/printer_data/config" ]; then
+    export HOME="$(getent passwd "$(whoami)" | cut -d: -f6)"
+fi
+
 CONFIG_FILE="$HOME/printer_data/config/MoonBackup.cfg"
 LOG_DIR="$HOME/printer_data/logs"
 LOG_FILE="$LOG_DIR/moonbackup.log"
@@ -234,8 +240,9 @@ backup_local() {
     excludes=$(create_exclude_list)
     
     # Build tar command
-    # Use --checkpoint=.1000 to log progress every 1000 records (helps detect hangs)
-    local tar_cmd="tar --checkpoint=.1000 -czf \"$backup_file\" -C \"$HOME\" ${excludes}"
+    # Use --checkpoint=.100 to log progress every 100 records (helps detect hangs)
+    # --warning=no-file-changed prevents tar from failing on files that change during backup
+    local tar_cmd="tar --checkpoint=.100 --warning=no-file-changed -czf \"$backup_file\" -C \"$HOME\" ${excludes}"
     
     # Add files to include based on configuration
     if [ "$BACKUP_HOME" = "1" ]; then

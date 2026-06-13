@@ -1,5 +1,5 @@
 #!/bin/bash
-# MoonBackup Installer v1.0.1
+# MoonBackup Installer v1.0.2
 # Created: 2024-05-04
 # Last updated: $(date +%Y-%m-%d\ %H:%M:%S)
 # Creates directory structure, checks dependencies, and registers macros
@@ -180,12 +180,12 @@ else
 # MoonBackup Shell Commands
 [gcode_shell_command moonbackup_backup]
 command: bash ${MOONBACKUP_PATH}/moonbackup.sh --no-stop
-timeout: 120
+timeout: 600
 verbose: True
 
 [gcode_shell_command moonbackup_restore]
 command: bash ${MOONBACKUP_PATH}/restore.sh
-timeout: 180
+timeout: 900
 verbose: True
 
 [gcode_shell_command moonbackup_status]
