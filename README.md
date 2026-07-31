@@ -322,10 +322,12 @@ tail -f ~/printer_data/logs/moonbackup-restore.log
 ```
 ERROR: G-Code Shell Command is not installed!
 ```
-Install it with:
+Install it via KIAUH:
 ```bash
-sudo apt update
-sudo apt install -y moonraker-gcode-shell-command
+~/kiauh/kiauh.sh
+# Select: [6] Moonraker
+# Select: [4] Install gcode_shell_command
+# Then restart Moonraker:
 sudo systemctl restart moonraker
 ```
 
@@ -342,13 +344,6 @@ MOONRAKER_STOP_WAIT=30
 Make sure you have sendmail, mail, or swaks installed:
 ```bash
 sudo apt install -y sendmail
-```
-
-### Verify Configuration
-
-```bash
-# Check if config file is valid
-bash -n ~/printer_data/config/MoonBackup.cfg && echo "Config is valid" || echo "Config has errors"
 ```
 
 ## File Structure
